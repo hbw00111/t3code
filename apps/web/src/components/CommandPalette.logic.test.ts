@@ -139,6 +139,33 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
 }
 
 describe("buildThreadActionItems", () => {
+  it("matches localized command labels", () => {
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [
+        {
+          value: "actions",
+          label: "Actions",
+          items: [
+            {
+              kind: "action",
+              value: "action:settings",
+              searchTerms: ["打开设置", "settings"],
+              title: "打开设置",
+              icon: null,
+              run: async () => undefined,
+            },
+          ],
+        },
+      ],
+      query: "设置",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+
+    expect(groups[0]?.items.map((item) => item.value)).toEqual(["action:settings"]);
+  });
+
   it("orders threads by most recent activity and formats timestamps from updatedAt", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-25T12:00:00.000Z"));

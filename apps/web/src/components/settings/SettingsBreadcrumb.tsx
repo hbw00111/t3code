@@ -3,31 +3,34 @@ import {
   WorkspaceBreadcrumbItem,
   WorkspaceBreadcrumbSeparator,
 } from "../WorkspaceBreadcrumb";
-import { SETTINGS_SECTION_LABELS } from "./settingsSearch";
+import { useTranslation } from "react-i18next";
+import { getSettingsSectionLabels } from "./settingsSearch";
 
-const SETTINGS_BREADCRUMB_LABELS: Readonly<Record<string, string>> = {
-  ...SETTINGS_SECTION_LABELS,
-  "/settings/diagnostics": "Diagnostics",
-};
-
-function settingsBreadcrumbLabel(pathname: string): string | null {
+function settingsBreadcrumbLabel(
+  pathname: string,
+  labels: Readonly<Record<string, string>>,
+): string | null {
   const normalizedPathname = pathname.replace(/\/+$/, "") || "/";
-  return SETTINGS_BREADCRUMB_LABELS[normalizedPathname] ?? null;
+  return labels[normalizedPathname] ?? null;
 }
 
 export function SettingsBreadcrumb({ pathname }: { pathname: string }) {
-  const sectionLabel = settingsBreadcrumbLabel(pathname);
+  const { t } = useTranslation();
+  const sectionLabel = settingsBreadcrumbLabel(pathname, {
+    ...getSettingsSectionLabels(t),
+    "/settings/diagnostics": t("settings.sections.diagnostics"),
+  });
 
   return (
-    <WorkspaceBreadcrumb ariaLabel="Settings breadcrumb">
+    <WorkspaceBreadcrumb ariaLabel={t("settings.breadcrumb")}>
       {sectionLabel ? (
         <>
-          <WorkspaceBreadcrumbItem>Settings</WorkspaceBreadcrumbItem>
+          <WorkspaceBreadcrumbItem>{t("common.settings")}</WorkspaceBreadcrumbItem>
           <WorkspaceBreadcrumbSeparator />
         </>
       ) : null}
       <WorkspaceBreadcrumbItem current className="truncate">
-        {sectionLabel ?? "Settings"}
+        {sectionLabel ?? t("common.settings")}
       </WorkspaceBreadcrumbItem>
     </WorkspaceBreadcrumb>
   );

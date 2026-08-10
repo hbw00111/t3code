@@ -1,26 +1,32 @@
 import { type ProviderInstanceId } from "@t3tools/contracts";
+import type { TFunction } from "i18next";
 import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SparklesIcon, StarIcon } from "lucide-react";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { isProviderInstancePickerReady, type ProviderInstanceEntry } from "../../providerInstances";
+import { useTranslation } from "react-i18next";
 
 /**
  * Build the hover tooltip for an instance button. Mirrors the old
  * kind-based copy but uses the entry's configured `displayName` so custom
  * instances get their user-authored name (e.g. "Codex Personal — Unavailable.").
  */
-function describeUnavailableInstance(entry: ProviderInstanceEntry): string {
+function describeUnavailableInstance(entry: ProviderInstanceEntry, t: TFunction): string {
   const label = entry.displayName;
   if (!entry.enabled || entry.status === "disabled") {
-    return `${label} — Disabled in settings.`;
+    return t("modelPicker.disabledInSettings", { provider: label });
   }
   if (entry.status === "ready" && entry.isAvailable) {
     return label;
   }
   const kind =
-    entry.status === "error" ? "Unavailable" : entry.status === "warning" ? "Limited" : "Not ready";
+    entry.status === "error"
+      ? t("modelPicker.unavailable")
+      : entry.status === "warning"
+        ? t("modelPicker.limited")
+        : t("modelPicker.notReady");
   const msg = entry.snapshot.message?.trim();
   return msg ? `${label} — ${kind}. ${msg}` : `${label} — ${kind}.`;
 }
@@ -58,6 +64,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
    */
   newBadgeInstanceIds?: ReadonlySet<ProviderInstanceId>;
 }) {
+  const { t } = useTranslation();
   const handleSelect = (instanceId: ProviderInstanceId | "favorites") => {
     props.onSelectInstance(instanceId);
   };
@@ -115,7 +122,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                         )}
                         onClick={() => handleSelect("favorites")}
                         type="button"
-                        aria-label="Favorites"
+                        aria-label={t("modelPicker.favorites")}
                       >
                         <StarIcon className="size-5 fill-current shrink-0" aria-hidden />
                       </button>
@@ -127,7 +134,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                     align="center"
                     className={PICKER_TOOLTIP_CLASS}
                   >
-                    Favorites
+                    {t("modelPicker.favorites")}
                   </TooltipPopup>
                 </Tooltip>
               </div>
@@ -147,11 +154,11 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
               Boolean(entry.accentColor) || (duplicateDriverCounts.get(entry.driverKind) ?? 0) > 1;
 
             const tooltip = isUnavailable
-              ? describeUnavailableInstance(entry)
+              ? describeUnavailableInstance(entry, t)
               : isContextDisabled
                 ? (props.getDisabledInstanceTooltip?.(entry) ?? entry.displayName)
                 : showNewBadge
-                  ? `${entry.displayName} — New`
+                  ? t("modelPicker.providerNew", { provider: entry.displayName })
                   : entry.displayName;
 
             const button = (
@@ -176,7 +183,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                   isDisabled
                     ? tooltip
                     : showNewBadge
-                      ? `${entry.displayName}, new`
+                      ? `${entry.displayName}, ${t("modelPicker.newBadge")}`
                       : entry.displayName
                 }
               >

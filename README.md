@@ -68,6 +68,7 @@ Full docs live in [docs/](./docs). There's no docs site yet.
 - [Install and first run](./docs/user/install.md)
 - [Permission modes](./docs/user/permission-modes.md)
 - [Keyboard shortcuts](./docs/user/keybindings.md)
+- [Change the interface language](./docs/user/interface-language.md)
 - [Drag local files into a message](./docs/user/drag-local-files.md)
 - [Customize a project icon](./docs/user/project-settings.md)
 - [Remote access from a phone or another machine](./docs/user/remote-access.md)

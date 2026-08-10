@@ -1,5 +1,6 @@
 import { InfoIcon, Undo2Icon } from "lucide-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
+import { useTranslation } from "react-i18next";
 import {
   createContext,
   type ComponentPropsWithoutRef,
@@ -85,6 +86,7 @@ function useSettingsSearchTarget<T extends HTMLElement>(id: string | undefined) 
 
 /** Info affordance explaining how a setting interacts with the shared background policy. */
 export function PolicyTooltip({ children }: { readonly children: string }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger
@@ -92,7 +94,7 @@ export function PolicyTooltip({ children }: { readonly children: string }) {
           <button
             type="button"
             className="inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
-            aria-label="Background policy details"
+            aria-label={t("settings.backgroundPolicyDetails")}
           >
             <InfoIcon className="size-3.5" />
           </button>
@@ -210,6 +212,7 @@ export function SettingResetButton({
   disabled?: boolean;
   onClick: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger
@@ -217,7 +220,7 @@ export function SettingResetButton({
           <Button
             size="icon-xs"
             variant="ghost"
-            aria-label={`Reset ${label} to default`}
+            aria-label={t("settings.resetSetting", { setting: label })}
             disabled={disabled}
             className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
             onClick={(event) => {
@@ -229,7 +232,7 @@ export function SettingResetButton({
           </Button>
         }
       />
-      <TooltipPopup side="top">Reset to default</TooltipPopup>
+      <TooltipPopup side="top">{t("settings.resetToDefault")}</TooltipPopup>
     </Tooltip>
   );
 }

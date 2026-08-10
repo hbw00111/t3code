@@ -41,6 +41,7 @@ const clientSettings: ClientSettings = {
   sidebarThreadPreviewCount: 6,
   legacySidebarEnabled: false,
   timestampFormat: "24-hour",
+  uiLanguage: "zh-CN",
   wordWrap: true,
 };
 
@@ -161,6 +162,7 @@ describe("DesktopClientSettings", () => {
         assert.isTrue(Option.isSome(persisted));
         if (Option.isSome(persisted)) {
           assert.equal(persisted.value.timestampFormat, "24-hour");
+          assert.equal(persisted.value.uiLanguage, "en");
         }
       }),
     ),
@@ -186,6 +188,7 @@ describe("DesktopClientSettings", () => {
         assert.isTrue(Option.isSome(persisted));
         if (Option.isSome(persisted)) {
           assert.equal(persisted.value.timestampFormat, "12-hour");
+          assert.equal(persisted.value.uiLanguage, "en");
         }
       }),
     ),

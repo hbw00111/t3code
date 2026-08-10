@@ -1,5 +1,6 @@
 import { type ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { ChevronRightIcon } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { shortcutLabelForCommand } from "../keybindings";
 import {
   type CommandPaletteActionItem,
@@ -89,22 +90,32 @@ interface CommandPaletteResultsProps {
 }
 
 export function CommandPaletteResults(props: CommandPaletteResultsProps) {
+  const { t } = useTranslation();
+
   if (props.groups.length === 0) {
     return (
       <div className="py-10 text-center text-sm text-muted-foreground">
-        {props.emptyStateMessage ??
-          (props.isActionsOnly
-            ? "No matching actions."
-            : "No matching commands, projects, or threads.")}
+        {props.emptyStateMessage ?? t("commandPalette.noResults")}
       </div>
     );
   }
+
+  const groupLabels: Partial<Record<string, string>> = {
+    actions: t("commandPalette.actions"),
+    projects: t("commandPalette.projects"),
+    "projects-search": t("commandPalette.projects"),
+    "recent-threads": t("commandPalette.recent"),
+    threads: t("commandPalette.threads"),
+    "threads-search": t("commandPalette.threads"),
+  };
 
   return (
     <CommandList>
       {props.groups.map((group) => (
         <CommandGroup items={group.items} key={group.value}>
-          <CommandGroupLabel className="ps-[9px]">{group.label}</CommandGroupLabel>
+          <CommandGroupLabel className="ps-[9px]">
+            {groupLabels[group.value] ?? group.label}
+          </CommandGroupLabel>
           <CommandCollection>
             {(item) =>
               item.disabled ? (

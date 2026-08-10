@@ -2,6 +2,7 @@ import type { ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { FolderPlusIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
+import { Trans, useTranslation } from "react-i18next";
 
 import { openCommandPalette } from "~/commandPaletteBus";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
@@ -33,6 +34,7 @@ export function DraftHeroHeadline({
   activeProjectRef,
   activeProjectTitle,
 }: DraftHeroHeadlineProps) {
+  const { t } = useTranslation();
   const projects = useProjects();
   const threads = useThreadShells();
   const { environments } = useEnvironments();
@@ -133,7 +135,7 @@ export function DraftHeroHeadline({
         <MenuSeparator />
         <MenuItem onClick={openAddProject}>
           <FolderPlusIcon />
-          New project
+          {t("chat.newProject")}
         </MenuItem>
       </MenuPopup>
     </Menu>
@@ -143,18 +145,18 @@ export function DraftHeroHeadline({
       onClick={openAddProject}
       className="pointer-events-auto inline cursor-pointer border-muted-foreground/35 border-b border-dotted text-muted-foreground/60 transition-colors hover:border-muted-foreground/60 hover:text-muted-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
     >
-      {activeProjectTitle ?? "Add a project"}
+      {activeProjectTitle ?? t("chat.addProject")}
     </button>
   );
 
   return (
     <h1 className="mx-auto w-full max-w-5xl text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
       {hasResolvedProject ? (
-        <>What should we build in {projectSelector}?</>
+        <Trans i18nKey="chat.whatBuildIn" components={{ project: projectSelector }} />
       ) : canChooseProject ? (
-        <>{projectSelector} to start</>
+        <Trans i18nKey="chat.selectProjectToStart" components={{ project: projectSelector }} />
       ) : (
-        <>Add a project to start</>
+        <>{t("chat.addProjectToStart")}</>
       )}
     </h1>
   );

@@ -1,3 +1,7 @@
+import type { TFunction } from "i18next";
+
+import { i18n } from "../../i18n/i18n";
+
 export type SettingsPath =
   | "/settings/general"
   | "/settings/appearance"
@@ -14,205 +18,211 @@ export interface SettingsSearchItem {
   readonly targetId?: string;
 }
 
-/**
- * Section labels in sidebar order. The sidebar nav and the search-result
- * subtitles both render from this record, so each label exists once.
- */
-export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
-  "/settings/general": "General",
-  "/settings/appearance": "Appearance",
-  "/settings/keybindings": "Keybindings",
-  "/settings/providers": "Providers",
-  "/settings/source-control": "Source Control",
-  "/settings/connections": "Connections",
-  "/settings/archived": "Archive",
+const SETTINGS_SECTION_LABEL_KEYS: Readonly<Record<SettingsPath, string>> = {
+  "/settings/general": "settings.sections.general",
+  "/settings/appearance": "settings.sections.appearance",
+  "/settings/keybindings": "settings.sections.keybindings",
+  "/settings/providers": "settings.sections.providers",
+  "/settings/source-control": "settings.sections.sourceControl",
+  "/settings/connections": "settings.sections.connections",
+  "/settings/archived": "settings.sections.archive",
 };
 
-/**
- * Every searchable setting, in result order. This catalog is the single
- * source of truth for anchor ids and visible titles: panels render both via
- * `searchableSetting`, so a retitle (or, later, a translation pass) happens
- * here once instead of separately in the panel and the index.
- */
-export const SETTINGS_SEARCH_ITEMS = [
+export function getSettingsSectionLabels(
+  t: TFunction = i18n.t.bind(i18n),
+): Readonly<Record<SettingsPath, string>> {
+  return Object.fromEntries(
+    Object.entries(SETTINGS_SECTION_LABEL_KEYS).map(([path, key]) => [path, t(key)]),
+  ) as Readonly<Record<SettingsPath, string>>;
+}
+
+const SETTINGS_SEARCH_DEFINITIONS = [
   {
     id: "color-scheme",
-    title: "Color scheme",
+    titleKey: "settings.items.colorScheme",
     to: "/settings/appearance",
-    // The scheme tiles sit at the top of the Appearance section.
     targetId: "appearance",
   },
   {
     id: "theme",
-    title: "Themes",
+    titleKey: "settings.items.theme",
     to: "/settings/appearance",
-    // Theme cards live directly under the scheme tiles; the section is the
-    // stable scroll destination for both.
     targetId: "appearance",
   },
   {
-    // Prefixed because the slider control already owns the `glass-opacity` id.
     id: "setting-glass-opacity",
-    title: "Glass opacity",
+    titleKey: "settings.items.glassOpacity",
     to: "/settings/appearance",
   },
   {
     id: "environment-identification",
-    title: "Environment identification",
+    titleKey: "settings.items.environmentIdentification",
     to: "/settings/appearance",
-    // The setting is stage-dependent, so its parent section is the stable destination.
     targetId: "appearance",
   },
   {
     id: "interface-font",
-    title: "Interface font",
+    titleKey: "settings.items.interfaceFont",
     to: "/settings/appearance",
   },
   {
     id: "prompt-font",
-    title: "Prompt font",
+    titleKey: "settings.items.promptFont",
     to: "/settings/appearance",
   },
   {
     id: "code-font",
-    title: "Code font",
+    titleKey: "settings.items.codeFont",
     to: "/settings/appearance",
   },
   {
     id: "terminal-font",
-    title: "Terminal font",
+    titleKey: "settings.items.terminalFont",
     to: "/settings/appearance",
   },
   {
     id: "font-smoothing",
-    title: "Font smoothing",
+    titleKey: "settings.items.fontSmoothing",
     to: "/settings/appearance",
   },
   {
     id: "word-wrap",
-    title: "Word wrap",
+    titleKey: "settings.items.wordWrap",
     to: "/settings/appearance",
   },
   {
     id: "project-grouping",
-    title: "Project grouping",
+    titleKey: "settings.items.projectGrouping",
     to: "/settings/general",
   },
   {
     id: "auto-settle-inactive-threads",
-    title: "Auto-settle inactive threads",
+    titleKey: "settings.items.autoSettleInactiveThreads",
+    to: "/settings/general",
+  },
+  {
+    id: "language",
+    titleKey: "settings.items.language",
     to: "/settings/general",
   },
   {
     id: "time-format",
-    title: "Time format",
+    titleKey: "settings.items.timeFormat",
     to: "/settings/general",
   },
   {
     id: "hide-whitespace-changes",
-    title: "Hide whitespace changes",
+    titleKey: "settings.items.hideWhitespaceChanges",
     to: "/settings/general",
   },
   {
     id: "provider-update-checks",
-    title: "Provider update checks",
+    titleKey: "settings.items.providerUpdateChecks",
     to: "/settings/general",
   },
   {
     id: "new-threads",
-    title: "New threads",
+    titleKey: "settings.items.newThreads",
     to: "/settings/general",
   },
   {
     id: "start-from-origin",
-    title: "Start from origin",
+    titleKey: "settings.items.startFromOrigin",
     to: "/settings/general",
     targetId: "new-threads",
   },
   {
     id: "add-project-starts-in",
-    title: "Add project starts in",
+    titleKey: "settings.items.addProjectStartsIn",
     to: "/settings/general",
   },
   {
     id: "archive-confirmation",
-    title: "Archive confirmation",
+    titleKey: "settings.items.archiveConfirmation",
     to: "/settings/general",
   },
   {
     id: "delete-confirmation",
-    title: "Delete confirmation",
+    titleKey: "settings.items.deleteConfirmation",
     to: "/settings/general",
   },
   {
     id: "text-generation-model",
-    title: "Text generation model",
+    titleKey: "settings.items.textGenerationModel",
     to: "/settings/general",
   },
   {
     id: "diagnostics",
-    title: "Diagnostics",
+    titleKey: "settings.items.diagnostics",
     to: "/settings/general",
   },
   {
     id: "legacy-plan-mode",
-    title: "Plan mode (legacy)",
+    titleKey: "settings.items.legacyPlanMode",
     to: "/settings/general",
   },
   {
     id: "legacy-token-streaming",
-    title: "Stream token by token (legacy)",
+    titleKey: "settings.items.legacyTokenStreaming",
     to: "/settings/general",
   },
   {
     id: "legacy-sidebar",
-    title: "Sidebar (legacy)",
+    titleKey: "settings.items.legacySidebar",
     to: "/settings/general",
   },
   {
     id: "keybindings",
-    title: "Keybindings",
+    titleKey: "settings.items.keybindings",
     to: "/settings/keybindings",
   },
   {
     id: "providers",
-    title: "Providers",
+    titleKey: "settings.items.providers",
     to: "/settings/providers",
   },
   {
     id: "source-control",
-    title: "Source control",
+    titleKey: "settings.items.sourceControl",
     to: "/settings/source-control",
   },
   {
     id: "remote-environments",
-    title: "Remote environments",
+    titleKey: "settings.items.remoteEnvironments",
     to: "/settings/connections",
   },
   {
     id: "archive",
-    title: "Archived threads",
+    titleKey: "settings.items.archivedThreads",
     to: "/settings/archived",
   },
-] as const satisfies ReadonlyArray<SettingsSearchItem>;
+] as const;
 
-export type SettingsSearchItemId = (typeof SETTINGS_SEARCH_ITEMS)[number]["id"];
+export type SettingsSearchItemId = (typeof SETTINGS_SEARCH_DEFINITIONS)[number]["id"];
 
-const SEARCH_ITEMS_BY_ID = Object.fromEntries(
-  SETTINGS_SEARCH_ITEMS.map((item) => [item.id, item]),
-) as Readonly<Record<SettingsSearchItemId, SettingsSearchItem>>;
+export function getSettingsSearchItems(
+  t: TFunction = i18n.t.bind(i18n),
+): ReadonlyArray<SettingsSearchItem> {
+  return SETTINGS_SEARCH_DEFINITIONS.map(({ titleKey, ...item }) => ({
+    ...item,
+    title: t(titleKey),
+  }));
+}
 
-/**
- * `id` and `title` props for the element a search item anchors to. Panels
- * spread (or pick from) this instead of restating the strings, so the catalog
- * and the rendered settings cannot drift apart.
- */
+const englishT = i18n.getFixedT("en");
+export const SETTINGS_SECTION_LABELS = getSettingsSectionLabels(englishT);
+export const SETTINGS_SEARCH_ITEMS = getSettingsSearchItems(englishT);
+
+const SEARCH_DEFINITIONS_BY_ID = Object.fromEntries(
+  SETTINGS_SEARCH_DEFINITIONS.map((item) => [item.id, item]),
+) as Readonly<Record<SettingsSearchItemId, (typeof SETTINGS_SEARCH_DEFINITIONS)[number]>>;
+
 export function searchableSetting(id: SettingsSearchItemId): {
   readonly id: string;
   readonly title: string;
 } {
-  const { id: anchorId, title } = SEARCH_ITEMS_BY_ID[id];
-  return { id: anchorId, title };
+  const { id: anchorId, titleKey } = SEARCH_DEFINITIONS_BY_ID[id];
+  return { id: anchorId, title: i18n.t(titleKey) };
 }
 
 function normalizeSearchText(value: string): string {
@@ -226,7 +236,7 @@ function normalizeSearchText(value: string): string {
 
 export function searchSettings(
   query: string,
-  items: ReadonlyArray<SettingsSearchItem> = SETTINGS_SEARCH_ITEMS,
+  items: ReadonlyArray<SettingsSearchItem> = getSettingsSearchItems(),
 ): ReadonlyArray<SettingsSearchItem> {
   const normalizedQuery = normalizeSearchText(query);
   if (normalizedQuery.length === 0) return [];
