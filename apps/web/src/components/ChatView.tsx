@@ -240,6 +240,7 @@ import {
 } from "../state/entities";
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
+import { desktopHostCanReadEnvironmentPaths } from "./chat/composerMentionDrag";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
@@ -6204,6 +6205,13 @@ function ChatViewContent(props: ChatViewProps) {
                             composerRef={composerRef}
                             composerDraftTarget={composerDraftTarget}
                             environmentId={environmentId}
+                            canResolveHostFilePaths={
+                              environmentId === primaryEnvironmentId &&
+                              desktopHostCanReadEnvironmentPaths(
+                                primaryEnvironment?.serverConfig?.environment.platform.os,
+                                navigator.platform,
+                              )
+                            }
                             routeKind={routeKind}
                             routeThreadRef={routeThreadRef}
                             draftId={draftId}

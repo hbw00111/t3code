@@ -5,7 +5,9 @@ import {
   type ComposerMentionDropHost,
   composerMentionFromTreePath,
   dataTransferHasComposerMention,
+  desktopHostCanReadEnvironmentPaths,
   makeComposerMentionDragHandlers,
+  partitionComposerFileDrop,
 } from "./composerMentionDrag.ts";
 
 const makeDragEvent = (options?: { mention?: string; types?: ReadonlyArray<string> }) => {
@@ -61,6 +63,70 @@ describe("dataTransferHasComposerMention", () => {
     expect(dataTransferHasComposerMention([COMPOSER_MENTION_DRAG_TYPE, "text/plain"])).toBe(true);
     expect(dataTransferHasComposerMention(["Files"])).toBe(false);
     expect(dataTransferHasComposerMention([])).toBe(false);
+  });
+});
+
+describe("desktopHostCanReadEnvironmentPaths", () => {
+  it.each([
+    ["darwin", "MacIntel", true],
+    ["windows", "Win32", true],
+    ["linux", "Linux x86_64", true],
+    ["linux", "Win32", false],
+    ["unknown", "MacIntel", false],
+    [null, "MacIntel", false],
+  ] as const)("maps %s on %s to %s", (environmentOs, desktopPlatform, expected) => {
+    expect(desktopHostCanReadEnvironmentPaths(environmentOs, desktopPlatform)).toBe(expected);
+  });
+});
+
+describe("partitionComposerFileDrop", () => {
+  const image = { name: "reference.png", type: "image/png" };
+  const file = { name: "notes.txt", type: "text/plain" };
+  const directory = { name: "家教", type: "" };
+
+  it("keeps images on the attachment path and turns Finder paths into mentions", () => {
+    const paths = new Map([
+      [file, "/Users/test/notes.txt"],
+      [directory, "/Users/test/家教/"],
+    ]);
+
+    const result = partitionComposerFileDrop(
+      [image, file, directory],
+      (item) => paths.get(item) ?? null,
+    );
+
+    expect(result.attachmentFiles).toEqual([image]);
+    expect(result.mentionText).toBe(
+      "[notes.txt](/Users/test/notes.txt) [家教](/Users/test/%E5%AE%B6%E6%95%99) ",
+    );
+  });
+
+  it("leaves unresolved files on the existing unsupported-file path", () => {
+    const result = partitionComposerFileDrop([file], () => null);
+
+    expect(result.attachmentFiles).toEqual([file]);
+    expect(result.mentionText).toBe("");
+  });
+
+  it("does not let a host path lookup failure break the drop", () => {
+    const result = partitionComposerFileDrop([file], () => {
+      throw new Error("not backed by a host file");
+    });
+
+    expect(result.attachmentFiles).toEqual([file]);
+    expect(result.mentionText).toBe("");
+  });
+
+  it("deduplicates host paths while preserving their first-seen order", () => {
+    const duplicate = { name: "notes.txt", type: "text/plain" };
+    const result = partitionComposerFileDrop([file, directory, duplicate], (item) =>
+      item === directory ? "/Users/test/家教" : "/Users/test/notes.txt",
+    );
+
+    expect(result.attachmentFiles).toEqual([]);
+    expect(result.mentionText).toBe(
+      "[notes.txt](/Users/test/notes.txt) [家教](/Users/test/%E5%AE%B6%E6%95%99) ",
+    );
   });
 });
 

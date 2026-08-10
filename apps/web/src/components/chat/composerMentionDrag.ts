@@ -1,4 +1,7 @@
+import type { ExecutionEnvironmentPlatformOs } from "@t3tools/contracts";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
+
+import { isLinuxPlatform, isMacPlatform, isWindowsPlatform } from "../../lib/utils";
 
 /**
  * Drag payload type carrying a serialized composer mention. Set on drags that
@@ -17,6 +20,73 @@ export function composerMentionFromTreePath(treePath: string): string | null {
 
 export function dataTransferHasComposerMention(types: ReadonlyArray<string>): boolean {
   return types.includes(COMPOSER_MENTION_DRAG_TYPE);
+}
+
+export function desktopHostCanReadEnvironmentPaths(
+  environmentOs: ExecutionEnvironmentPlatformOs | null | undefined,
+  desktopPlatform: string,
+): boolean {
+  if (environmentOs === "darwin") return isMacPlatform(desktopPlatform);
+  if (environmentOs === "windows") return isWindowsPlatform(desktopPlatform);
+  if (environmentOs === "linux") return isLinuxPlatform(desktopPlatform);
+  return false;
+}
+
+export interface ComposerDroppedFile {
+  readonly name: string;
+  readonly type: string;
+}
+
+export interface ComposerFileDropPartition<FileLike extends ComposerDroppedFile> {
+  /** Images and unresolved files continue through the existing attachment validation. */
+  readonly attachmentFiles: ReadonlyArray<FileLike>;
+  /** Canonical composer mentions for host-backed files and directories. */
+  readonly mentionText: string;
+}
+
+/**
+ * Splits an OS file drop without weakening the existing image attachment
+ * path. Desktop-backed non-images become file mentions; browser-only or
+ * otherwise unresolved files stay on the current unsupported-file path.
+ */
+export function partitionComposerFileDrop<FileLike extends ComposerDroppedFile>(
+  files: ReadonlyArray<FileLike>,
+  getPathForFile?: (file: FileLike) => string | null,
+): ComposerFileDropPartition<FileLike> {
+  const attachmentFiles: FileLike[] = [];
+  const mentions: string[] = [];
+  const seenPaths = new Set<string>();
+
+  for (const file of files) {
+    if (file.type.startsWith("image/") || !getPathForFile) {
+      attachmentFiles.push(file);
+      continue;
+    }
+
+    let path: string | null = null;
+    try {
+      path = getPathForFile(file);
+    } catch {
+      // Synthetic browser Files have no host path. Preserve the existing
+      // unsupported-file feedback instead of breaking the whole drop.
+    }
+
+    const mention = path ? composerMentionFromTreePath(path) : null;
+    if (!path || !mention) {
+      attachmentFiles.push(file);
+      continue;
+    }
+    if (seenPaths.has(path)) {
+      continue;
+    }
+    seenPaths.add(path);
+    mentions.push(mention);
+  }
+
+  return {
+    attachmentFiles,
+    mentionText: mentions.length > 0 ? `${mentions.join(" ")} ` : "",
+  };
 }
 
 export interface ComposerMentionDragTransfer {

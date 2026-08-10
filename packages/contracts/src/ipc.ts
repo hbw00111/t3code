@@ -1037,6 +1037,12 @@ export interface DesktopBridge {
   setWslOnly: (enabled: boolean) => Promise<DesktopWslState>;
   pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
   /**
+   * Resolve a host-backed browser `File` from an OS drag to its absolute
+   * path. Optional so a newer web bundle still works with older desktop
+   * shells; browser-created files resolve to null.
+   */
+  getPathForFile?: (file: File) => string | null;
+  /**
    * Multi-select JSON file picker that opens in the VS Code extensions
    * directory when one exists. Optional: older desktop builds lack it, and
    * web callers fall back to a plain file input.

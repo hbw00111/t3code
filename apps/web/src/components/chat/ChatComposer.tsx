@@ -45,6 +45,7 @@ import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
 import {
   dataTransferHasComposerMention,
   makeComposerMentionDragHandlers,
+  partitionComposerFileDrop,
 } from "./composerMentionDrag";
 import {
   type ComposerImageAttachment,
@@ -493,6 +494,7 @@ export interface ChatComposerHandle {
 export interface ChatComposerProps {
   composerDraftTarget: ScopedThreadRef | DraftId;
   environmentId: EnvironmentId;
+  canResolveHostFilePaths: boolean;
   routeKind: "server" | "draft";
   routeThreadRef: ScopedThreadRef;
   draftId: DraftId | null;
@@ -604,6 +606,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const {
     composerDraftTarget,
     environmentId,
+    canResolveHostFilePaths,
     routeKind,
     routeThreadRef,
     draftId,
@@ -2408,11 +2411,29 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const onComposerDrop = (event: React.DragEvent<HTMLDivElement>) => {
     if (!event.dataTransfer.types.includes("Files")) return;
     event.preventDefault();
+    event.stopPropagation();
+    event.nativeEvent.stopPropagation();
     dragDepthRef.current = 0;
     setIsDragOverComposer(false);
     const files = Array.from(event.dataTransfer.files);
-    void addComposerImages(files);
-    focusComposer();
+    const getPathForFile = canResolveHostFilePaths
+      ? window.desktopBridge?.getPathForFile
+      : undefined;
+    const drop = partitionComposerFileDrop(files, getPathForFile);
+    if (
+      drop.mentionText.length > 0 &&
+      !insertComposerTextAtEnd(drop.mentionText, { ensureLeadingBoundary: true })
+    ) {
+      toastManager.add({
+        type: "error",
+        title: "Unable to add to chat",
+        description: "The composer is busy; try again once it is ready.",
+      });
+    }
+    void addComposerImages(Array.from(drop.attachmentFiles));
+    if (drop.mentionText.length === 0) {
+      focusComposer();
+    }
   };
 
   const insertComposerTextAtEnd = (
@@ -2452,6 +2473,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       });
     },
   });
+
+  const onComposerDropCapture = (event: React.DragEvent<HTMLDivElement>) => {
+    if (dataTransferHasComposerMention(event.dataTransfer.types)) {
+      composerMentionDragHandlers.onDrop(event);
+      return;
+    }
+    onComposerDrop(event);
+  };
 
   const onComposerMentionDragLeaveCapture = (event: React.DragEvent<HTMLDivElement>) => {
     if (!dataTransferHasComposerMention(event.dataTransfer.types)) return;
@@ -2663,11 +2692,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         onDragEnter={onComposerDragEnter}
         onDragOver={onComposerDragOver}
         onDragLeave={onComposerDragLeave}
-        onDrop={onComposerDrop}
         onDragEnterCapture={composerMentionDragHandlers.onDragEnter}
         onDragOverCapture={composerMentionDragHandlers.onDragOver}
         onDragLeaveCapture={onComposerMentionDragLeaveCapture}
-        onDropCapture={composerMentionDragHandlers.onDrop}
+        onDropCapture={onComposerDropCapture}
       >
         <div
           ref={composerSurfaceRef}
