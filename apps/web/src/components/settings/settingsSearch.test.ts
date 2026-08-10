@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  getSettingsSearchItems,
   searchableSetting,
   searchSettings,
   SETTINGS_SEARCH_ITEMS,
   type SettingsSearchItem,
 } from "./settingsSearch";
+import { i18n } from "../../i18n/i18n";
 
 const ITEMS: ReadonlyArray<SettingsSearchItem> = [
   {
@@ -47,6 +49,15 @@ describe("searchSettings", () => {
     expect(searchSettings("  WORD   WRAP  ", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
     expect(searchSettings("glass").map((item) => item.id)).toEqual(["setting-glass-opacity"]);
     expect(searchSettings("xyzzy")).toEqual([]);
+  });
+
+  it("searches translated setting titles", () => {
+    const chineseItems = getSettingsSearchItems(i18n.getFixedT("zh-CN"));
+    expect(searchSettings("语言", chineseItems).map((item) => item.id)).toEqual(["language"]);
+    expect(searchSettings("模型服务", chineseItems).map((item) => item.id)).toEqual([
+      "provider-update-checks",
+      "providers",
+    ]);
   });
 
   it("keeps catalog order for multiple title matches", () => {

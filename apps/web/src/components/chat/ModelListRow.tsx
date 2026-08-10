@@ -13,6 +13,7 @@ import { Kbd } from "../ui/kbd";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { modelPickerModelKey } from "./modelPickerKeys";
+import { useTranslation } from "react-i18next";
 
 export const ModelListRow = memo(function ModelListRow(props: {
   index: number;
@@ -38,6 +39,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
   disabledReason?: string | null;
   onToggleFavorite: () => void;
 }) {
+  const { t } = useTranslation();
   const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[props.driverKind] ?? null;
   const providerLabel = props.model.subProvider
     ? `${props.providerDisplayName} · ${props.model.subProvider}`
@@ -70,9 +72,9 @@ export const ModelListRow = memo(function ModelListRow(props: {
           {props.showNewBadge ? (
             <span
               className="shrink-0 rounded border border-update/35 bg-update/15 px-0.5 py-px text-[10px] font-bold uppercase leading-none tracking-wide text-update-foreground"
-              aria-label="New model"
+              aria-label={t("modelPicker.newModel")}
             >
-              New
+              {t("modelPicker.newBadge")}
             </span>
           ) : null}
         </div>
@@ -108,7 +110,9 @@ export const ModelListRow = memo(function ModelListRow(props: {
                   event.stopPropagation();
                 }}
                 disabled={Boolean(props.disabledReason)}
-                aria-label={props.isFavorite ? "Remove from favorites" : "Add to favorites"}
+                aria-label={
+                  props.isFavorite ? t("modelPicker.removeFavorite") : t("modelPicker.addFavorite")
+                }
               >
                 <StarIcon
                   className={cn(
@@ -120,7 +124,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
             }
           />
           <TooltipPopup side="top" align="center">
-            {props.isFavorite ? "Remove from favorites" : "Add to favorites"}
+            {props.isFavorite ? t("modelPicker.removeFavorite") : t("modelPicker.addFavorite")}
           </TooltipPopup>
         </Tooltip>
       </div>

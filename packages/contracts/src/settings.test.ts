@@ -33,6 +33,22 @@ describe("ClientSettings word wrap", () => {
   });
 });
 
+describe("ClientSettings UI language", () => {
+  it("defaults legacy settings to English", () => {
+    expect(decodeClientSettings({}).uiLanguage).toBe("en");
+  });
+
+  it.each(["en", "zh-CN"] as const)("accepts a supported language: %s", (uiLanguage) => {
+    expect(decodeClientSettings({ uiLanguage }).uiLanguage).toBe(uiLanguage);
+    expect(decodeClientSettingsPatch({ uiLanguage }).uiLanguage).toBe(uiLanguage);
+  });
+
+  it("rejects unsupported languages", () => {
+    expect(() => decodeClientSettings({ uiLanguage: "fr" })).toThrow();
+    expect(() => decodeClientSettingsPatch({ uiLanguage: "fr" })).toThrow();
+  });
+});
+
 describe("ClientSettings glass opacity", () => {
   it("defaults to a readable translucent surface", () => {
     expect(decodeClientSettings({}).glassOpacity).toBe(80);
