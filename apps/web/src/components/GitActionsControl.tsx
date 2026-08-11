@@ -19,6 +19,7 @@ import { useNavigate } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { useTranslation } from "react-i18next";
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -972,6 +973,7 @@ export default function GitActionsControl({
   activeThreadRef,
   draftId,
 }: GitActionsControlProps) {
+  const { t } = useTranslation();
   const updateThreadMetadata = useAtomCommand(
     threadEnvironment.updateMetadata,
     "thread branch metadata update",
@@ -1671,7 +1673,7 @@ export default function GitActionsControl({
               toastManager.add(
                 stackedThreadToast({
                   type: "error",
-                  title: "Git initialization failed",
+                  title: t("gitActions.initializationFailed"),
                   description: error instanceof Error ? error.message : "An error occurred.",
                   ...(threadToastData !== undefined ? { data: threadToastData } : {}),
                 }),
@@ -1681,11 +1683,11 @@ export default function GitActionsControl({
         >
           <GitBranchPlusIcon className="size-3.5" aria-hidden />
           <span className="ml-0.5">
-            {initAction.isPending ? "Initializing..." : "Initialize Git"}
+            {initAction.isPending ? t("gitActions.initializingGit") : t("gitActions.initializeGit")}
           </span>
         </Button>
       ) : (
-        <Group aria-label="Git actions" className="shrink-0">
+        <Group aria-label={t("gitActions.groupLabel")} className="shrink-0">
           {quickActionDisabledReason ? (
             <Popover>
               <PopoverTrigger

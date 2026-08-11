@@ -2,6 +2,7 @@ import type { ProjectScript, ResolvedKeybindingsConfig } from "@t3tools/contract
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
+import { i18n } from "../i18n/i18n";
 import ProjectScriptsControl from "./ProjectScriptsControl";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
@@ -57,7 +58,7 @@ describe("ProjectScriptsControl compact controls", () => {
   it("keeps the standalone Add control compact and expands it with its label", () => {
     const html = renderControl([]);
 
-    expectResponsiveXsControl(buttonTag(html, "Add action"));
+    expectResponsiveXsControl(buttonTag(html, i18n.t("projectScripts.addAction")));
     expect(html).toContain(
       'class="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5"',
     );

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { ProviderDriverKind, type ProviderOptionDescriptor } from "@t3tools/contracts";
-import { buildTraitsTriggerDisplay } from "./TraitsPicker";
+import { i18n } from "../../i18n/i18n";
+import { buildTraitsTriggerDisplay, localizeProviderOptionDescriptors } from "./TraitsPicker";
 
 function selectDescriptor(
   id: string,
@@ -128,5 +129,31 @@ describe("buildTraitsTriggerDisplay", () => {
         ultrathinkPromptControlled: true,
       }),
     ).toEqual({ label: "Ultrathink", showFastModeIcon: true });
+  });
+
+  it("localizes known provider option ids while preserving their values", () => {
+    const localized = localizeProviderOptionDescriptors(
+      [
+        selectDescriptor(
+          "reasoningEffort",
+          [
+            { id: "medium", label: "Medium" },
+            { id: "high", label: "High" },
+          ],
+          "medium",
+        ),
+      ],
+      i18n.getFixedT("zh-CN"),
+    );
+
+    expect(localized[0]).toMatchObject({
+      id: "reasoningEffort",
+      label: "推理强度",
+      currentValue: "medium",
+      options: [
+        { id: "medium", label: "中等" },
+        { id: "high", label: "高" },
+      ],
+    });
   });
 });
