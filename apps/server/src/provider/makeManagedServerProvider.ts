@@ -16,7 +16,7 @@ import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
-import { forkParked, ServerActivation } from "../serverActivation.ts";
+import { forkAfterServerReady, ServerPostReady } from "../serverActivation.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import type { ServerProviderShape } from "./Services/ServerProvider.ts";
 
@@ -55,15 +55,17 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   );
   const initialSettings = yield* input.getSettings;
   const initialSnapshot = yield* input.initialSnapshot(initialSettings);
+  const providerSettingsChanges = yield* Queue.sliding<void>(1);
   const snapshotStateRef = yield* Ref.make<ProviderSnapshotState>({
     snapshot: initialSnapshot,
     enrichmentGeneration: 0,
   });
   const settingsRef = yield* Ref.make(initialSettings);
+  const latestSettingsRef = yield* Ref.make(initialSettings);
   const enrichmentFiberRef = yield* Ref.make<Fiber.Fiber<void, unknown> | null>(null);
   const scope = yield* Effect.scope;
-  const serverActivation = yield* ServerActivation;
-  const awaitServerActivation = serverActivation ?? Effect.void;
+  const postReady = yield* ServerPostReady;
+  const awaitPostReady = postReady ?? Effect.void;
 
   const publishEnrichedSnapshot = Effect.fn("publishEnrichedSnapshot")(function* (
     generation: number,
@@ -124,7 +126,7 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
       return yield* Ref.get(snapshotStateRef).pipe(Effect.map((state) => state.snapshot));
     }
 
-    yield* awaitServerActivation;
+    yield* awaitPostReady;
     const nextSnapshot = yield* input.checkProvider;
     const nextGeneration = yield* Ref.modify(snapshotStateRef, (state) => {
       const generation = input.enrichSnapshot
@@ -143,12 +145,28 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     yield* restartSnapshotEnrichment(nextSettings, nextSnapshot, nextGeneration);
     return nextSnapshot;
   });
-  const applySnapshot = (nextSettings: Settings, options?: { readonly forceRefresh?: boolean }) =>
-    refreshSemaphore.withPermits(1)(applySnapshotBase(nextSettings, options));
+  const getBackgroundSettings = input.getSettings.pipe(
+    Effect.tapError(Effect.logError),
+    Effect.catch(() => Ref.get(latestSettingsRef)),
+  );
+
+  const applyCurrentSettings = (
+    currentSettings: Effect.Effect<Settings, ServerSettingsError>,
+    options?: { readonly forceRefresh?: boolean },
+  ) =>
+    refreshSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const nextSettings = yield* currentSettings;
+        return yield* applySnapshotBase(nextSettings, options);
+      }),
+    );
 
   const refreshSnapshot = Effect.fn("refreshSnapshot")(function* () {
-    const nextSettings = yield* input.getSettings;
-    return yield* applySnapshot(nextSettings, { forceRefresh: true });
+    return yield* applyCurrentSettings(input.getSettings, { forceRefresh: true });
+  });
+
+  const refreshBackgroundSnapshot = Effect.fn("refreshBackgroundSnapshot")(function* () {
+    return yield* applyCurrentSettings(getBackgroundSettings, { forceRefresh: true });
   });
 
   const hasProviderStatusDemand = Effect.gen(function* () {
@@ -188,8 +206,18 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   }
 
   yield* Stream.runForEach(input.streamSettings, (nextSettings) =>
-    Effect.asVoid(applySnapshot(nextSettings)),
+    Ref.set(latestSettingsRef, nextSettings).pipe(
+      Effect.andThen(Queue.offer(providerSettingsChanges, undefined)),
+      Effect.asVoid,
+    ),
   ).pipe(Effect.forkScoped);
+
+  const applyProviderSettingsChanges = Effect.forever(
+    Queue.take(providerSettingsChanges).pipe(
+      Effect.andThen(applyCurrentSettings(getBackgroundSettings)),
+      Effect.ignoreCause({ log: true }),
+    ),
+  );
 
   yield* Effect.forever(
     getRefreshInterval.pipe(
@@ -218,8 +246,13 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   ).pipe(Effect.forkScoped);
 
   // Provider probes can saturate the process and filesystem pools. Keep the
-  // cached/pending snapshot available during boot, then probe after activation.
-  yield* forkParked(refreshSnapshot().pipe(Effect.ignoreCause({ log: true })));
+  // cached/pending snapshot available during boot, then probe after readiness.
+  yield* forkAfterServerReady(
+    refreshBackgroundSnapshot().pipe(
+      Effect.ignoreCause({ log: true }),
+      Effect.andThen(applyProviderSettingsChanges),
+    ),
+  );
 
   return {
     maintenanceCapabilities: input.maintenanceCapabilities,

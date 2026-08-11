@@ -112,7 +112,7 @@ import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
-import { forkParked, ServerActivation } from "./serverActivation.ts";
+import { forkParked, ServerActivation, ServerPostReady } from "./serverActivation.ts";
 
 // Effect's default preemptive shutdown waits 20s before finalizing request scopes.
 // T3's primary transport is long-lived WebSocket RPC, whose Effect scope finalizer
@@ -458,6 +458,8 @@ export const makeServerLayer = Layer.unwrap(
     const activation = yield* Deferred.make<void>();
     const awaitActivation = Deferred.await(activation);
     const activationLayer = Layer.succeed(ServerActivation, awaitActivation);
+    const postReady = yield* Deferred.make<void>();
+    const postReadyLayer = Layer.succeed(ServerPostReady, Deferred.await(postReady));
     const runtimeStateParked = yield* Deferred.make<void>();
     const tailscaleParked = yield* Deferred.make<void>();
     const cloudLinkParked = yield* Deferred.make<void>();
@@ -630,7 +632,12 @@ export const makeServerLayer = Layer.unwrap(
 
     const runtimeServicesLive = ServerRuntimeStartup.layerWithOptions({
       activate: Deferred.succeed(activation, undefined).pipe(Effect.asVoid),
-      abort: (error) => Deferred.die(activation, error).pipe(Effect.asVoid),
+      releasePostReady: Deferred.succeed(postReady, undefined).pipe(Effect.asVoid),
+      abort: (error) =>
+        Deferred.die(activation, error).pipe(
+          Effect.andThen(Deferred.die(postReady, error)),
+          Effect.asVoid,
+        ),
       awaitAuxiliaryParked: Effect.all(
         [
           Deferred.await(runtimeStateParked),
@@ -656,6 +663,7 @@ export const makeServerLayer = Layer.unwrap(
     return serverApplicationLayer.pipe(
       Layer.provideMerge(runtimeServicesLive),
       Layer.provide(activationLayer),
+      Layer.provide(postReadyLayer),
       Layer.provideMerge(serverRelayBrokerTracingLayer),
       Layer.provideMerge(HttpServerLive),
       Layer.provide(ApplicationObservabilityLive),

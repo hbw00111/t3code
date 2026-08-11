@@ -292,6 +292,7 @@ const runStartupPhase = <A, E, R>(phase: string, effect: Effect.Effect<A, E, R>)
 
 interface StartupOptions {
   readonly activate?: Effect.Effect<void>;
+  readonly releasePostReady?: Effect.Effect<void>;
   readonly awaitAuxiliaryParked?: Effect.Effect<void>;
   readonly abort?: (error: ServerRuntimeStartupError) => Effect.Effect<void>;
 }
@@ -465,6 +466,7 @@ export const make = (options?: StartupOptions) =>
         "server.host": serverConfig.host ?? "default",
       }),
       Effect.withSpan("server.startup", { kind: "server", root: true }),
+      Effect.andThen(options?.releasePostReady ?? Effect.void),
     );
 
     yield* Effect.forkScoped(
