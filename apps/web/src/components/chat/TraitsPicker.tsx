@@ -15,6 +15,8 @@ import {
   isClaudeUltrathinkPrompt,
 } from "@t3tools/shared/model";
 import { memo, useCallback, useState } from "react";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 import type { VariantProps } from "class-variance-authority";
 import { ZapIcon } from "lucide-react";
 import { buttonVariants } from "../ui/button";
@@ -49,13 +51,82 @@ type TraitsPersistence =
 const ULTRATHINK_PROMPT_PREFIX = "Ultrathink:\n";
 
 function DefaultBadge() {
+  const { t } = useTranslation();
   return (
     <Badge
       variant="outline"
       className="inline-flex h-4 w-fit min-w-0 items-center justify-center gap-0 border-border/70 bg-muted/60 px-1.5 py-0 font-semibold text-[10px] text-muted-foreground leading-none sm:h-4"
     >
-      Default
+      {t("providerOptions.default")}
     </Badge>
+  );
+}
+
+const REASONING_DESCRIPTOR_IDS = new Set(["effort", "reasoning", "reasoningEffort"]);
+
+function localizedDescriptorLabel(t: TFunction, descriptor: ProviderOptionDescriptor): string {
+  if (REASONING_DESCRIPTOR_IDS.has(descriptor.id)) {
+    return t("providerOptions.reasoning.label");
+  }
+  if (descriptor.id === "serviceTier") {
+    return t("providerOptions.serviceTier.label");
+  }
+  return descriptor.label;
+}
+
+function localizedOptionLabel(
+  t: TFunction,
+  descriptorId: string,
+  option: { readonly id: string; readonly label: string },
+): string {
+  if (REASONING_DESCRIPTOR_IDS.has(descriptorId)) {
+    switch (option.id) {
+      case "none":
+        return t("providerOptions.reasoning.none");
+      case "minimal":
+        return t("providerOptions.reasoning.minimal");
+      case "low":
+        return t("providerOptions.reasoning.low");
+      case "medium":
+        return t("providerOptions.reasoning.medium");
+      case "high":
+        return t("providerOptions.reasoning.high");
+      case "xhigh":
+        return t("providerOptions.reasoning.xhigh");
+      case "max":
+        return t("providerOptions.reasoning.max");
+      case "ultra":
+        return t("providerOptions.reasoning.ultra");
+      case "ultracode":
+        return t("providerOptions.reasoning.ultracode");
+      case "ultrathink":
+        return t("providerOptions.reasoning.ultrathink");
+      default:
+        return option.label;
+    }
+  }
+  if (descriptorId === "serviceTier") {
+    if (option.id === "default") return t("providerOptions.serviceTier.standard");
+    if (option.id === "priority") return t("providerOptions.serviceTier.fast");
+  }
+  return option.label;
+}
+
+export function localizeProviderOptionDescriptors(
+  descriptors: ReadonlyArray<ProviderOptionDescriptor>,
+  t: TFunction,
+): ReadonlyArray<ProviderOptionDescriptor> {
+  return descriptors.map((descriptor) =>
+    descriptor.type === "select"
+      ? {
+          ...descriptor,
+          label: localizedDescriptorLabel(t, descriptor),
+          options: descriptor.options.map((option) => ({
+            ...option,
+            label: localizedOptionLabel(t, descriptor.id, option),
+          })),
+        }
+      : { ...descriptor, label: localizedDescriptorLabel(t, descriptor) },
   );
 }
 
@@ -229,6 +300,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   allowPromptInjectedEffort = true,
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence) {
+  const { t } = useTranslation();
   const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
   const updateModelOptions = useCallback(
     (nextOptions: ProviderOptions | undefined) => {
@@ -306,12 +378,11 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
             {index > 0 ? <MenuDivider /> : null}
             <MenuGroup>
               <div className="px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs">
-                {descriptor.label}
+                {localizedDescriptorLabel(t, descriptor)}
               </div>
               {ultrathinkInBodyText && descriptor.id === primarySelectDescriptor?.id ? (
                 <div className="px-2 pb-1.5 text-muted-foreground/80 text-xs">
-                  Your prompt contains &quot;ultrathink&quot; in the text. Remove it to change this
-                  option.
+                  {t("providerOptions.promptControlledHint")}
                 </div>
               ) : null}
               <MenuRadioGroup
@@ -330,7 +401,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
                   >
                     <span className="flex w-full min-w-0 items-center justify-between gap-3">
                       <span className="min-w-0 truncate">
-                        {option.label}
+                        {localizedOptionLabel(t, descriptor.id, option)}
                         {option.isDefault ? (
                           <>
                             {" "}
@@ -354,7 +425,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
             {index > 0 || selectDescriptors.length > 0 ? <MenuDivider /> : null}
             <MenuGroup>
               <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
-                {descriptor.label}
+                {localizedDescriptorLabel(t, descriptor)}
               </div>
               <MenuRadioGroup
                 value={selectedValue}
@@ -367,7 +438,9 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
                 {(["on", "off"] as const).map((value) => (
                   <MenuRadioItem key={value} value={value} hideIndicator closeOnClick>
                     <span className="flex w-full min-w-0 items-center justify-between gap-3">
-                      <span>{value === "on" ? "On" : "Off"}</span>
+                      <span>
+                        {value === "on" ? t("providerOptions.on") : t("providerOptions.off")}
+                      </span>
                     </span>
                   </MenuRadioItem>
                 ))}
@@ -387,12 +460,30 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
  * one exception is when fast mode is the only trait, where a bare bolt (or bare
  * chevron) would leave the trigger unreadable.
  */
+interface TraitsDisplayCopy {
+  readonly fast: string;
+  readonly normal: string;
+  readonly on: string;
+  readonly off: string;
+  readonly ultrathink: string;
+}
+
+const DEFAULT_TRAITS_DISPLAY_COPY: TraitsDisplayCopy = {
+  fast: "Fast",
+  normal: "Normal",
+  on: "On",
+  off: "Off",
+  ultrathink: "Ultrathink",
+};
+
 export function buildTraitsTriggerDisplay(input: {
   provider: ProviderDriverKind;
   descriptors: ReadonlyArray<ProviderOptionDescriptor>;
   primarySelectDescriptorId: string | null;
   ultrathinkPromptControlled: boolean;
+  copy?: Partial<TraitsDisplayCopy>;
 }): { label: string; showFastModeIcon: boolean } {
+  const copy = { ...DEFAULT_TRAITS_DISPLAY_COPY, ...input.copy };
   let hasFastMode = false;
   let fastModeEnabled = false;
   const labels: Array<string> = [];
@@ -408,7 +499,9 @@ export function buildTraitsTriggerDisplay(input: {
       descriptor.type === "select"
     ) {
       const currentValue = getProviderOptionCurrentValue(descriptor);
-      const fastTier = descriptor.options.find(({ label }) => label === "Fast");
+      const fastTier = descriptor.options.find(
+        ({ id, label }) => id === "priority" || label === "Fast",
+      );
       if (fastTier && (currentValue === "default" || currentValue === fastTier.id)) {
         hasFastMode = true;
         fastModeEnabled = currentValue === fastTier.id;
@@ -417,9 +510,9 @@ export function buildTraitsTriggerDisplay(input: {
     }
     const label =
       input.ultrathinkPromptControlled && descriptor.id === input.primarySelectDescriptorId
-        ? "Ultrathink"
+        ? copy.ultrathink
         : descriptor.type === "boolean"
-          ? `${descriptor.label} ${descriptor.currentValue === true ? "On" : "Off"}`
+          ? `${descriptor.label} ${descriptor.currentValue === true ? copy.on : copy.off}`
           : getProviderOptionCurrentLabel(descriptor);
     if (typeof label === "string" && label.length > 0) {
       labels.push(label);
@@ -430,7 +523,10 @@ export function buildTraitsTriggerDisplay(input: {
   // off an empty label list alone would also catch descriptors that resolved to
   // no label at all, printing a bogus "Normal" for a model without fast mode.
   if (labels.length === 0 && hasFastMode) {
-    return { label: fastModeEnabled ? "Fast" : "Normal", showFastModeIcon: false };
+    return {
+      label: fastModeEnabled ? copy.fast : copy.normal,
+      showFastModeIcon: false,
+    };
   }
   return { label: labels.join(" · "), showFastModeIcon: fastModeEnabled };
 }
@@ -448,6 +544,7 @@ export const TraitsPicker = memo(function TraitsPicker({
   triggerClassName,
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence) {
+  const { t } = useTranslation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const { descriptors, primarySelectDescriptor, ultrathinkPromptControlled } =
     getTraitsSectionVisibility({
@@ -473,9 +570,16 @@ export const TraitsPicker = memo(function TraitsPicker({
 
   const { label: triggerLabel, showFastModeIcon } = buildTraitsTriggerDisplay({
     provider,
-    descriptors,
+    descriptors: localizeProviderOptionDescriptors(descriptors, t),
     primarySelectDescriptorId: primarySelectDescriptor?.id ?? null,
     ultrathinkPromptControlled,
+    copy: {
+      fast: t("providerOptions.fast"),
+      normal: t("providerOptions.normal"),
+      on: t("providerOptions.on"),
+      off: t("providerOptions.off"),
+      ultrathink: t("providerOptions.ultrathink"),
+    },
   });
   const fastModeIcon = showFastModeIcon ? (
     <>
@@ -486,7 +590,7 @@ export const TraitsPicker = memo(function TraitsPicker({
           provider === "claudeAgent" ? "text-[#d97757]" : "text-foreground",
         )}
       />
-      <span className="sr-only">Fast mode on</span>
+      <span className="sr-only">{t("providerOptions.fastModeOn")}</span>
     </>
   ) : null;
 

@@ -19,5 +19,6 @@ describe("translation resources", () => {
     expect(zhCN.chat.send).toBe("发送");
     expect(zhCN.sidebar.newThread).toBe("新建任务");
     expect(zhCN.settings.sections.general).toBe("通用");
+    expect(zhCN.providerOptions.reasoning.medium).toBe("中等");
   });
 });

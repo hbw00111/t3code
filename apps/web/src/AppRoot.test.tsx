@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { ElectronBrowserHost } from "./browser/ElectronBrowserHost";
 import { PreviewAutomationHosts } from "./components/preview/PreviewAutomationHosts";
+import { AppLanguageProvider } from "./i18n";
 import { AppAtomRegistryProvider } from "./rpc/atomRegistry";
 import type { AppRouter } from "./router";
 import { AppRoot } from "./AppRoot";
@@ -13,8 +14,12 @@ describe("AppRoot", () => {
     const root = AppRoot({ router: {} as AppRouter });
 
     expect(root.type).toBe(AppAtomRegistryProvider);
-    const children = Children.toArray(
+    const languageProvider = Children.only(
       (root as ReactElement<{ readonly children: ReactNode }>).props.children,
+    );
+    expect(isValidElement(languageProvider) && languageProvider.type).toBe(AppLanguageProvider);
+    const children = Children.toArray(
+      (languageProvider as ReactElement<{ readonly children: ReactNode }>).props.children,
     );
     expect(children).toHaveLength(3);
     expect(isValidElement(children[0]) && children[0].type).toBe(RouterProvider);
