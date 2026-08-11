@@ -12,6 +12,35 @@ import { ServerConfig } from "../config.ts";
 import * as ResourceMonitorBinary from "./ResourceMonitorBinary.ts";
 
 describe("ResourceMonitorBinary", () => {
+  it.effect("does not inspect Linux libc on non-Linux hosts", () =>
+    Effect.gen(function* () {
+      const report = process.report;
+      const originalGetReport = report?.getReport;
+      let reportReads = 0;
+
+      if (report && originalGetReport) {
+        report.getReport = ((...args: Parameters<typeof originalGetReport>) => {
+          reportReads += 1;
+          return originalGetReport(...args);
+        }) as typeof originalGetReport;
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            report.getReport = originalGetReport;
+          }),
+        );
+      }
+
+      yield* ResourceMonitorBinary.make().pipe(
+        Effect.provide(ServerConfig.layerTest(process.cwd(), process.cwd())),
+        Effect.provideService(HostProcessPlatform, "darwin"),
+        Effect.provideService(HostProcessArchitecture, "arm64"),
+        Effect.provideService(HostProcessEnvironment, {}),
+      );
+
+      assert.equal(reportReads, 0);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("resolves an executable override", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
