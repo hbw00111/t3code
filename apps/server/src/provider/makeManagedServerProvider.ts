@@ -16,6 +16,7 @@ import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
+import { forkParked } from "../serverActivation.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import type { ServerProviderShape } from "./Services/ServerProvider.ts";
 
@@ -213,9 +214,10 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     ),
   ).pipe(Effect.forkScoped);
 
-  yield* applySnapshot(initialSettings, { forceRefresh: true }).pipe(
-    Effect.ignoreCause({ log: true }),
-    Effect.forkScoped,
+  // Provider probes can saturate the process and filesystem pools. Keep the
+  // cached/pending snapshot available during boot, then probe after activation.
+  yield* forkParked(
+    applySnapshot(initialSettings, { forceRefresh: true }).pipe(Effect.ignoreCause({ log: true })),
   );
 
   return {
