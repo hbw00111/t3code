@@ -10,6 +10,7 @@ import {
   TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -1083,6 +1084,7 @@ function NewKeybindingTableRow({
 }
 
 export function KeybindingsSettingsPanel() {
+  const { t } = useTranslation();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const keybindingsConfigPath = useAtomValue(primaryServerKeybindingsConfigPathAtom);
   const availableEditors = useAtomValue(primaryServerAvailableEditorsAtom);
@@ -1231,7 +1233,7 @@ export function KeybindingsSettingsPanel() {
   return (
     <SettingsPageContainer className="max-w-5xl">
       <SettingsSection
-        {...searchableSetting("keybindings")}
+        {...searchableSetting("keybindings", t)}
         headerAction={
           <div className="flex items-center gap-1.5">
             <ExpandableHeaderSearch

@@ -2,6 +2,7 @@ import { ChevronDownIcon, GitPullRequestIcon, InfoIcon, RefreshCwIcon } from "lu
 import * as Duration from "effect/Duration";
 import * as Option from "effect/Option";
 import { useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   BackgroundActivitySettings,
   SourceControlProviderKind,
@@ -472,10 +473,11 @@ function EmptySourceControlDiscovery({
   readonly isPending: boolean;
   readonly onScan: () => void;
 }) {
+  const { t } = useTranslation();
   const hasError = error !== null;
 
   return (
-    <SettingsSection id={searchableSetting("source-control").id} title="Server environment">
+    <SettingsSection id={searchableSetting("source-control", t).id} title="Server environment">
       <Empty className="min-h-88">
         <EmptyMedia variant="icon">
           <GitPullRequestIcon />
@@ -508,6 +510,7 @@ function EmptySourceControlDiscovery({
 }
 
 export function SourceControlSettingsPanel() {
+  const { t } = useTranslation();
   const environmentId = usePrimaryEnvironment()?.environmentId ?? null;
   const discovery = useEnvironmentQuery(
     environmentId === null
@@ -555,7 +558,7 @@ export function SourceControlSettingsPanel() {
         <>
           {hasVersionControlSystems ? (
             <SettingsSection
-              id={searchableSetting("source-control").id}
+              id={searchableSetting("source-control", t).id}
               title="Version Control"
               headerAction={scanButton}
             >
@@ -569,7 +572,7 @@ export function SourceControlSettingsPanel() {
 
           {result.sourceControlProviders.length > 0 ? (
             <SettingsSection
-              id={hasVersionControlSystems ? undefined : searchableSetting("source-control").id}
+              id={hasVersionControlSystems ? undefined : searchableSetting("source-control", t).id}
               title="Source Control Providers"
               headerAction={hasVersionControlSystems ? null : scanButton}
             >
