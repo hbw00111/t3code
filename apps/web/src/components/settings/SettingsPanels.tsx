@@ -1025,7 +1025,7 @@ export function AppearanceSettingsPanel() {
   return (
     <SettingsPageContainer>
       <SettingsSection id="appearance" title={t("settings.sections.appearance")}>
-        <div id={searchableSetting("theme").id}>
+        <div id={searchableSetting("theme", t).id}>
           <ThemeLibrary
             appearanceMode={appearanceMode}
             customThemes={customThemes}
@@ -1042,7 +1042,7 @@ export function AppearanceSettingsPanel() {
         </div>
 
         <SettingsRow
-          {...searchableSetting("setting-glass-opacity")}
+          {...searchableSetting("setting-glass-opacity", t)}
           description={t("settings.appearance.glassDescription")}
           resetAction={
             settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? (
@@ -1089,7 +1089,7 @@ export function AppearanceSettingsPanel() {
 
         {showEnvironmentIdentification ? (
           <SettingsRow
-            {...searchableSetting("environment-identification")}
+            {...searchableSetting("environment-identification", t)}
             description={t("settings.appearance.environmentDescription")}
             resetAction={
               settings.environmentIdentificationMode !== DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE ? (
@@ -1178,7 +1178,7 @@ function InterfaceFontRow({ preview }: { preview?: ReactNode }) {
   const defaults = useFontDefaultFamilies();
   return (
     <FontFamilySettingsRow
-      {...searchableSetting("interface-font")}
+      {...searchableSetting("interface-font", t)}
       description={t("settings.appearance.interfaceFontDescription")}
       defaultFamily={defaults.sans}
       value={settings.fontFamilySans}
@@ -1202,7 +1202,7 @@ function PromptFontRow() {
   const defaults = useFontDefaultFamilies();
   return (
     <FontFamilySettingsRow
-      {...searchableSetting("prompt-font")}
+      {...searchableSetting("prompt-font", t)}
       description={t("settings.appearance.promptFontDescription")}
       defaultFamily={defaults.interfaceFamily}
       value={settings.fontFamilyComposer}
@@ -1234,7 +1234,7 @@ function CodeFontRow({
   const defaults = useFontDefaultFamilies();
   return (
     <FontFamilySettingsRow
-      {...searchableSetting("code-font")}
+      {...searchableSetting("code-font", t)}
       {...(title !== undefined ? { title } : {})}
       description={description ?? t("settings.appearance.codeFontDescription")}
       defaultFamily={defaults.code}
@@ -1260,7 +1260,7 @@ function TerminalFontRow() {
   const defaults = useFontDefaultFamilies();
   return (
     <FontFamilySettingsRow
-      {...searchableSetting("terminal-font")}
+      {...searchableSetting("terminal-font", t)}
       description={t("settings.appearance.terminalFontDescription")}
       defaultFamily={defaults.code}
       value={settings.fontFamilyTerminal}
@@ -1294,7 +1294,7 @@ function FontSmoothingRow() {
   if (!isMacPlatform(navigator.platform)) return null;
   return (
     <SettingsRow
-      {...searchableSetting("font-smoothing")}
+      {...searchableSetting("font-smoothing", t)}
       description={t("settings.appearance.fontSmoothingDescription")}
       resetAction={
         settings.fontSmoothing !== DEFAULT_UNIFIED_SETTINGS.fontSmoothing ? (
@@ -1323,7 +1323,7 @@ function WordWrapRow() {
   const updateSettings = useUpdatePrimarySettings();
   return (
     <SettingsRow
-      {...searchableSetting("word-wrap")}
+      {...searchableSetting("word-wrap", t)}
       description={t("settings.appearance.wordWrapDescription")}
       resetAction={
         settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? (
@@ -1720,7 +1720,7 @@ function LegacyFeaturesSection() {
         <CollapsiblePanel>
           <div className="relative space-y-1 overflow-visible pt-3 text-foreground">
             <SettingsRow
-              {...searchableSetting("legacy-plan-mode")}
+              {...searchableSetting("legacy-plan-mode", t)}
               description={t("settings.general.legacyPlanModeDescription")}
               control={
                 <Switch
@@ -1733,7 +1733,7 @@ function LegacyFeaturesSection() {
               }
             />
             <SettingsRow
-              {...searchableSetting("legacy-token-streaming")}
+              {...searchableSetting("legacy-token-streaming", t)}
               description={t("settings.general.legacyTokenStreamingDescription")}
               control={
                 <Switch
@@ -1759,7 +1759,7 @@ function LegacyFeaturesSection() {
               }
             />
             <SettingsRow
-              {...searchableSetting("legacy-sidebar")}
+              {...searchableSetting("legacy-sidebar", t)}
               description={t("settings.general.legacySidebarDescription")}
               control={
                 <Switch
@@ -1837,7 +1837,7 @@ export function GeneralSettingsPanel() {
     <SettingsPageContainer>
       <SettingsSection title={t("settings.sections.general")}>
         <SettingsRow
-          {...searchableSetting("project-grouping")}
+          {...searchableSetting("project-grouping", t)}
           description={t("settings.general.projectGroupingDescription")}
           resetAction={
             settings.sidebarProjectGroupingMode !==
@@ -1873,7 +1873,7 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
-          {...searchableSetting("auto-settle-inactive-threads")}
+          {...searchableSetting("auto-settle-inactive-threads", t)}
           description={t("settings.general.autoSettleDescription")}
           resetAction={
             settings.sidebarAutoSettleAfterDays !==
@@ -1914,7 +1914,7 @@ export function GeneralSettingsPanel() {
         ) : null}
 
         <SettingsRow
-          {...searchableSetting("language")}
+          {...searchableSetting("language", t)}
           description={t("language.description")}
           resetAction={
             settings.uiLanguage !== DEFAULT_UNIFIED_SETTINGS.uiLanguage ? (
@@ -1953,7 +1953,7 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
-          {...searchableSetting("time-format")}
+          {...searchableSetting("time-format", t)}
           description={t("settings.general.timeFormatDescription")}
           resetAction={
             settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat ? (
@@ -2004,7 +2004,7 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
-          {...searchableSetting("hide-whitespace-changes")}
+          {...searchableSetting("hide-whitespace-changes", t)}
           description={t("settings.general.hideWhitespaceDescription")}
           resetAction={
             settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace ? (
@@ -2030,7 +2030,7 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
-          {...searchableSetting("provider-update-checks")}
+          {...searchableSetting("provider-update-checks", t)}
           description={t("settings.general.providerUpdatesDescription")}
           resetAction={
             settings.enableProviderUpdateChecks !==
@@ -2139,7 +2139,7 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
-          {...searchableSetting("new-threads")}
+          {...searchableSetting("new-threads", t)}
           description={t("settings.general.newThreadsDescription")}
           resetAction={
             settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode ||
@@ -2191,7 +2191,7 @@ export function GeneralSettingsPanel() {
         {settings.defaultThreadEnvMode === "worktree" ? (
           <SettingsRow
             className="bg-muted/20 sm:pl-9"
-            title={searchableSetting("start-from-origin").title}
+            title={searchableSetting("start-from-origin", t).title}
             description={t("settings.general.newWorktreesStartFromOriginDescription")}
             resetAction={
               settings.newWorktreesStartFromOrigin !==
@@ -2220,7 +2220,7 @@ export function GeneralSettingsPanel() {
         ) : null}
 
         <SettingsRow
-          {...searchableSetting("add-project-starts-in")}
+          {...searchableSetting("add-project-starts-in", t)}
           description={t("settings.general.addProjectStartsInDescription")}
           resetAction={
             settings.addProjectBaseDirectory !==
@@ -2248,7 +2248,7 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
-          {...searchableSetting("archive-confirmation")}
+          {...searchableSetting("archive-confirmation", t)}
           description={t("settings.general.archiveConfirmationDescription")}
           resetAction={
             settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive ? (
@@ -2274,7 +2274,7 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
-          {...searchableSetting("delete-confirmation")}
+          {...searchableSetting("delete-confirmation", t)}
           description={t("settings.general.deleteConfirmationDescription")}
           resetAction={
             settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete ? (
@@ -2300,7 +2300,7 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
-          {...searchableSetting("text-generation-model")}
+          {...searchableSetting("text-generation-model", t)}
           description={t("settings.general.textGenerationModelDescription")}
           resetAction={
             isTextGenerationModelDirty ? (
@@ -2384,7 +2384,7 @@ export function GeneralSettingsPanel() {
           />
         )}
         <SettingsRow
-          {...searchableSetting("diagnostics")}
+          {...searchableSetting("diagnostics", t)}
           description={diagnosticsDescription}
           control={
             <Button render={<Link to="/settings/diagnostics" />} size="xs" variant="outline">
@@ -2400,6 +2400,7 @@ export function GeneralSettingsPanel() {
 }
 
 export function ArchivedThreadsPanel() {
+  const { t } = useTranslation();
   const projects = useProjects();
   const { unarchiveThread, confirmAndDeleteThread } = useThreadActions();
   const environmentIds = useMemo(
@@ -2516,8 +2517,8 @@ export function ArchivedThreadsPanel() {
     <SettingsPageContainer>
       {archivedGroups.length === 0 ? (
         <SettingsSection
-          id={isLoadingArchive ? undefined : searchableSetting("archive").id}
-          title={searchableSetting("archive").title}
+          id={isLoadingArchive ? undefined : searchableSetting("archive", t).id}
+          title={searchableSetting("archive", t).title}
         >
           <SettingsRow
             title={
@@ -2545,7 +2546,7 @@ export function ArchivedThreadsPanel() {
         archivedGroups.map(({ project, threads: projectThreads }, index) => (
           <SettingsSection
             key={project.id}
-            id={index === 0 ? searchableSetting("archive").id : undefined}
+            id={index === 0 ? searchableSetting("archive", t).id : undefined}
             title={project.name}
             icon={
               <ProjectFavicon

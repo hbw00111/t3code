@@ -217,12 +217,15 @@ const SEARCH_DEFINITIONS_BY_ID = Object.fromEntries(
   SETTINGS_SEARCH_DEFINITIONS.map((item) => [item.id, item]),
 ) as Readonly<Record<SettingsSearchItemId, (typeof SETTINGS_SEARCH_DEFINITIONS)[number]>>;
 
-export function searchableSetting(id: SettingsSearchItemId): {
+export function searchableSetting(
+  id: SettingsSearchItemId,
+  t: TFunction,
+): {
   readonly id: string;
   readonly title: string;
 } {
   const { id: anchorId, titleKey } = SEARCH_DEFINITIONS_BY_ID[id];
-  return { id: anchorId, title: i18n.t(titleKey) };
+  return { id: anchorId, title: t(titleKey) };
 }
 
 function normalizeSearchText(value: string): string {

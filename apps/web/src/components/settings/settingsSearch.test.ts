@@ -77,8 +77,19 @@ describe("searchSettings", () => {
   });
 
   it("serves anchor props to panels from the catalog", () => {
-    expect(searchableSetting("word-wrap")).toEqual({ id: "word-wrap", title: "Word wrap" });
-    expect(searchableSetting("archive")).toEqual({ id: "archive", title: "Archived threads" });
+    const englishT = i18n.getFixedT("en");
+    expect(searchableSetting("word-wrap", englishT)).toEqual({
+      id: "word-wrap",
+      title: "Word wrap",
+    });
+    expect(searchableSetting("archive", englishT)).toEqual({
+      id: "archive",
+      title: "Archived threads",
+    });
+    expect(searchableSetting("word-wrap", i18n.getFixedT("zh-CN"))).toEqual({
+      id: "word-wrap",
+      title: "自动换行",
+    });
   });
 
   it("routes appearance settings to their current section", () => {

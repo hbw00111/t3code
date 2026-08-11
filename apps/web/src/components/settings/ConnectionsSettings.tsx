@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import { type ReactNode, memo, useCallback, useId, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   AuthAccessReadScope,
   AuthAccessWriteScope,
@@ -1725,6 +1726,7 @@ function CloudRemoteEnvironmentRows({
 }
 
 export function ConnectionsSettings() {
+  const { t } = useTranslation();
   const desktopBridge = window.desktopBridge;
   const { environments } = useEnvironments();
   const primaryEnvironment = usePrimaryEnvironment();
@@ -3354,7 +3356,7 @@ export function ConnectionsSettings() {
       )}
 
       <SettingsSection
-        {...searchableSetting("remote-environments")}
+        {...searchableSetting("remote-environments", t)}
         headerAction={
           <Dialog
             open={addBackendDialogOpen}
