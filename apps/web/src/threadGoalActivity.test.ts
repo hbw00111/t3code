@@ -4,6 +4,7 @@ import { type OrchestrationThreadActivity, ProviderDriverKind } from "@t3tools/c
 import {
   providerSupportsThreadGoals,
   threadGoalActivityTranslationKey,
+  threadGoalActivityTranslationValues,
 } from "./threadGoalActivity";
 
 const activity = (kind: string, payload: unknown): OrchestrationThreadActivity => ({
@@ -43,6 +44,35 @@ describe("threadGoalActivityTranslationKey", () => {
         }),
       ),
     ).toBe("chat.goalCommandFailed");
+  });
+
+  it("maps a goal query and exposes interpolation values", () => {
+    const queryActivity = activity("provider.thread.goal.read", {
+      commandId: "command-1",
+      operation: "get",
+      goal: {
+        objective: "Finish the migration",
+        status: "active",
+        tokensUsed: 42,
+        timeUsedSeconds: 7,
+      },
+    });
+
+    expect(threadGoalActivityTranslationKey(queryActivity)).toBe("chat.goalStatusActive");
+    expect(threadGoalActivityTranslationValues(queryActivity)).toEqual({
+      objective: "Finish the migration",
+      tokensUsed: 42,
+      timeUsedSeconds: 7,
+    });
+    expect(
+      threadGoalActivityTranslationKey(
+        activity("provider.thread.goal.read", {
+          commandId: "command-2",
+          operation: "get",
+          goal: null,
+        }),
+      ),
+    ).toBe("chat.goalNotSet");
   });
 
   it("ignores unrelated and malformed activities", () => {

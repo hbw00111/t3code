@@ -911,6 +911,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.goal.get":
     case "thread.goal.set":
     case "thread.goal.pause":
     case "thread.goal.resume":
@@ -921,13 +922,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       const operation =
-        command.type === "thread.goal.set"
-          ? "set"
-          : command.type === "thread.goal.pause"
-            ? "pause"
-            : command.type === "thread.goal.resume"
-              ? "resume"
-              : "clear";
+        command.type === "thread.goal.get"
+          ? "get"
+          : command.type === "thread.goal.set"
+            ? "set"
+            : command.type === "thread.goal.pause"
+              ? "pause"
+              : command.type === "thread.goal.resume"
+                ? "resume"
+                : "clear";
       const objective = command.type === "thread.goal.set" ? command.objective : undefined;
       return {
         ...(yield* withEventBase({

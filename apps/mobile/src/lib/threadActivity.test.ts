@@ -5,6 +5,7 @@ import {
   MessageId,
   ProjectId,
   ProviderInstanceId,
+  THREAD_GOAL_READ_ACTIVITY_KIND,
   ThreadId,
   TurnId,
   type OrchestrationThread,
@@ -56,6 +57,72 @@ function makeThread(
 }
 
 describe("buildThreadFeed", () => {
+  it("shows the current goal snapshot for a bare /goal query", () => {
+    const thread = makeThread({
+      id: ThreadId.make("thread-goal"),
+      projectId: ProjectId.make("project-1"),
+      title: "Goal status",
+      activities: [
+        makeActivity({
+          id: EventId.make("goal-read"),
+          kind: THREAD_GOAL_READ_ACTIVITY_KIND,
+          summary: "Thread goal status",
+          createdAt: "2026-04-01T00:00:02.000Z",
+          payload: {
+            commandId: "command-goal-read",
+            operation: "get",
+            goal: {
+              objective: "Finish the mobile flow",
+              status: "active",
+              tokensUsed: 123,
+              timeUsedSeconds: 45,
+              tokenBudget: 2_000,
+            },
+          },
+        }),
+      ],
+    });
+
+    expect(buildThreadFeed(thread)).toMatchObject([
+      {
+        type: "activity-group",
+        activities: [
+          {
+            summary: "Goal: Finish the mobile flow · active · 123 tokens · 45s",
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("shows when a bare /goal query finds no goal", () => {
+    const thread = makeThread({
+      id: ThreadId.make("thread-goal-empty"),
+      projectId: ProjectId.make("project-1"),
+      title: "No goal",
+      activities: [
+        makeActivity({
+          id: EventId.make("goal-read-empty"),
+          kind: THREAD_GOAL_READ_ACTIVITY_KIND,
+          summary: "Thread goal status",
+          createdAt: "2026-04-01T00:00:02.000Z",
+          payload: {
+            commandId: "command-goal-read-empty",
+            operation: "get",
+            goal: null,
+          },
+        }),
+      ],
+    });
+
+    expect(buildThreadFeed(thread)).toMatchObject([
+      {
+        type: "activity-group",
+        activities: [{ summary: "No goal is set" }],
+      },
+    ]);
+  });
+
   it("keeps historic work entries attributed to their turns", () => {
     const thread = makeThread({
       id: ThreadId.make("thread-1"),

@@ -8,6 +8,8 @@ import {
   type ProjectId,
   type OrchestrationSession,
   type ThreadGoalActivityPayload,
+  type ThreadGoalSnapshot,
+  THREAD_GOAL_READ_ACTIVITY_KIND,
   THREAD_GOAL_UPDATED_ACTIVITY_KIND,
   THREAD_GOAL_UPDATE_FAILED_ACTIVITY_KIND,
   ThreadId,
@@ -386,7 +388,8 @@ const make = Effect.gen(function* () {
 
   const appendThreadGoalActivity = Effect.fn("appendThreadGoalActivity")(function* (input: {
     readonly event: Extract<ProviderIntentEvent, { type: "thread.goal-requested" }>;
-    readonly status: "updated" | "failed";
+    readonly status: "read" | "updated" | "failed";
+    readonly goal?: ThreadGoalSnapshot | null;
     readonly detail?: string;
   }) {
     const completedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
@@ -404,14 +407,22 @@ const make = Effect.gen(function* () {
         kind:
           input.status === "failed"
             ? THREAD_GOAL_UPDATE_FAILED_ACTIVITY_KIND
-            : THREAD_GOAL_UPDATED_ACTIVITY_KIND,
-        summary: input.status === "failed" ? "Thread goal update failed" : "Thread goal updated",
+            : input.status === "read"
+              ? THREAD_GOAL_READ_ACTIVITY_KIND
+              : THREAD_GOAL_UPDATED_ACTIVITY_KIND,
+        summary:
+          input.status === "failed"
+            ? "Thread goal command failed"
+            : input.status === "read"
+              ? "Thread goal status"
+              : "Thread goal updated",
         payload: {
           commandId: input.event.commandId ?? commandId,
           operation: input.event.payload.operation,
           ...(input.event.payload.objective !== undefined
             ? { objective: input.event.payload.objective }
             : {}),
+          ...(input.goal !== undefined ? { goal: input.goal } : {}),
           ...(input.detail !== undefined ? { detail: input.detail } : {}),
         } satisfies ThreadGoalActivityPayload,
         turnId: null,
@@ -1233,7 +1244,7 @@ const make = Effect.gen(function* () {
     const updateExit = yield* Effect.exit(
       Effect.gen(function* () {
         yield* ensureSessionForThread(event.payload.threadId, event.payload.createdAt);
-        yield* providerService.setThreadGoal({
+        return yield* providerService.setThreadGoal({
           threadId: event.payload.threadId,
           operation: event.payload.operation,
           ...(event.payload.objective !== undefined ? { objective: event.payload.objective } : {}),
@@ -1250,7 +1261,11 @@ const make = Effect.gen(function* () {
         detail: formatFailureDetail(updateExit.cause),
       });
     }
-    yield* appendThreadGoalActivity({ event, status: "updated" });
+    yield* appendThreadGoalActivity({
+      event,
+      status: event.payload.operation === "get" ? "read" : "updated",
+      goal: updateExit.value,
+    });
   });
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (

@@ -235,7 +235,7 @@ describe("ProviderCommandReactor", () => {
         turnId: asTurnId("turn-1"),
       }),
     );
-    const setThreadGoal = vi.fn<ProviderServiceShape["setThreadGoal"]>(() => Effect.void);
+    const setThreadGoal = vi.fn<ProviderServiceShape["setThreadGoal"]>(() => Effect.succeed(null));
     const interruptTurn = vi.fn((_: unknown) => Effect.void);
     const respondToRequest = vi.fn<ProviderServiceShape["respondToRequest"]>(() => Effect.void);
     const respondToUserInput = vi.fn<ProviderServiceShape["respondToUserInput"]>(() => Effect.void);
@@ -607,6 +607,73 @@ describe("ProviderCommandReactor", () => {
         commandId: "cmd-thread-goal-set",
         operation: "set",
         objective: "Finish the migration",
+      },
+    });
+  });
+
+  it("projects the provider goal snapshot for a status query", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    harness.setThreadGoal.mockImplementationOnce(() =>
+      Effect.succeed({
+        objective: "Finish the migration",
+        status: "active",
+        tokensUsed: 42,
+        timeUsedSeconds: 7,
+        tokenBudget: 1_000,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-goal-query"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "ready",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.goal.get",
+        commandId: CommandId.make("cmd-thread-goal-get"),
+        threadId: ThreadId.make("thread-1"),
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.setThreadGoal.mock.calls.length === 1);
+    await harness.drain();
+    expect(harness.setThreadGoal.mock.calls[0]?.[0]).toEqual({
+      threadId: ThreadId.make("thread-1"),
+      operation: "get",
+    });
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(
+      thread?.activities.find((activity) => activity.kind === "provider.thread.goal.read"),
+    ).toMatchObject({
+      tone: "info",
+      payload: {
+        commandId: "cmd-thread-goal-get",
+        operation: "get",
+        goal: {
+          objective: "Finish the migration",
+          status: "active",
+          tokensUsed: 42,
+          timeUsedSeconds: 7,
+          tokenBudget: 1_000,
+        },
       },
     });
   });

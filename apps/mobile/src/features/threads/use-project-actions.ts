@@ -16,7 +16,10 @@ import { AsyncResult } from "effect/unstable/reactivity";
 import { threadEnvironment } from "../../state/threads";
 import type { DraftComposerImageAttachment } from "../../lib/composerImages";
 import { makeTurnCommandMetadata, type TurnCommandMetadata } from "../../lib/commandMetadata";
-import { buildProjectThreadStartTurnInput } from "../../lib/projectThreadStartTurn";
+import {
+  buildProjectThreadGoalInput,
+  buildProjectThreadStartTurnInput,
+} from "../../lib/projectThreadStartTurn";
 import { randomHex } from "../../lib/uuid";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { setPendingConnectionError } from "../../state/use-remote-environment-registry";
@@ -91,5 +94,68 @@ export function useCreateProjectThread() {
       );
     },
     [startTurn],
+  );
+}
+
+export function useCreateProjectGoal() {
+  const setGoal = useAtomCommand(threadEnvironment.setGoal, { reportFailure: false });
+
+  return useCallback(
+    async (input: {
+      readonly project: EnvironmentProject;
+      readonly modelSelection: ModelSelection;
+      readonly envMode: "local" | "worktree";
+      readonly branch: string | null;
+      readonly worktreePath: string | null;
+      readonly startFromOrigin?: boolean;
+      readonly runtimeMode: RuntimeMode;
+      readonly objective: string;
+    }) => {
+      const metadata = makeTurnCommandMetadata();
+      const threadId = ThreadId.make(metadata.threadId);
+      const objective = input.objective.trim();
+      const validationError = validateProjectThreadCreation({
+        environmentId: input.project.environmentId,
+        projectId: input.project.id,
+        environmentMode: input.envMode,
+        branch: input.branch,
+        initialMessageText: objective,
+      });
+      if (validationError !== null) {
+        setPendingConnectionError(validationError.message);
+        return AsyncResult.failure(Cause.fail(validationError));
+      }
+
+      const result = await setGoal({
+        environmentId: input.project.environmentId,
+        input: buildProjectThreadGoalInput({
+          projectId: input.project.id,
+          projectCwd: input.project.workspaceRoot,
+          threadId: metadata.threadId,
+          commandId: metadata.commandId,
+          createdAt: metadata.createdAt,
+          objective,
+          modelSelection: input.modelSelection,
+          runtimeMode: input.runtimeMode,
+          workspaceMode: input.envMode,
+          branch: input.branch,
+          worktreePath: input.worktreePath,
+          startFromOrigin: input.startFromOrigin ?? false,
+          worktreeBranchName: buildTemporaryWorktreeBranchName(randomHex),
+        }),
+      });
+      if (AsyncResult.isFailure(result)) {
+        const error = Cause.squash(result.cause);
+        setPendingConnectionError(
+          error instanceof Error ? error.message : "The goal could not be started.",
+        );
+        return AsyncResult.failure(result.cause);
+      }
+      setPendingConnectionError(null);
+      return mapAtomCommandResult(result, () =>
+        scopeThreadRef(input.project.environmentId, threadId),
+      );
+    },
+    [setGoal],
   );
 }

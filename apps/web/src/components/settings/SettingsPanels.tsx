@@ -2485,8 +2485,8 @@ export function ArchivedThreadsPanel() {
       if (!api) return;
       const clicked = await api.contextMenu.show(
         [
-          { id: "unarchive", label: "Unarchive" },
-          { id: "delete", label: "Delete", destructive: true },
+          { id: "unarchive", label: t("sidebar.unarchiveThread") },
+          { id: "delete", label: t("common.delete"), destructive: true },
         ],
         position,
       );
@@ -2500,8 +2500,8 @@ export function ArchivedThreadsPanel() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Failed to unarchive thread",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              title: t("settings.archive.failedToUnarchive"),
+              description: error instanceof Error ? error.message : t("sidebar.errorOccurred"),
             }),
           );
         }
@@ -2517,14 +2517,14 @@ export function ArchivedThreadsPanel() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Failed to delete thread",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              title: t("settings.archive.failedToDelete"),
+              description: error instanceof Error ? error.message : t("sidebar.errorOccurred"),
             }),
           );
         }
       }
     },
-    [confirmAndDeleteThread, refreshArchivedThreads, unarchiveThread],
+    [confirmAndDeleteThread, refreshArchivedThreads, t, unarchiveThread],
   );
 
   return (
@@ -2543,16 +2543,16 @@ export function ArchivedThreadsPanel() {
                   <ArchiveIcon className="size-3.5 text-muted-foreground" />
                 )}
                 {isLoadingArchive
-                  ? "Loading archived threads"
+                  ? t("settings.archive.loading")
                   : archiveError
-                    ? "Could not load archived threads"
-                    : "No archived threads"}
+                    ? t("settings.archive.loadFailed")
+                    : t("settings.archive.empty")}
               </span>
             }
             description={
               isLoadingArchive
-                ? "Checking connected environments."
-                : (archiveError ?? "Archived threads will appear here.")
+                ? t("settings.archive.checkingEnvironments")
+                : (archiveError ?? t("settings.archive.emptyDescription"))
             }
           />
         </SettingsSection>
@@ -2590,9 +2590,9 @@ export function ArchivedThreadsPanel() {
                       toastManager.add(
                         stackedThreadToast({
                           type: "error",
-                          title: "Archived thread action failed",
+                          title: t("settings.archive.actionFailed"),
                           description:
-                            error instanceof Error ? error.message : "An error occurred.",
+                            error instanceof Error ? error.message : t("sidebar.errorOccurred"),
                         }),
                       );
                     }
@@ -2601,9 +2601,10 @@ export function ArchivedThreadsPanel() {
                 title={thread.title}
                 description={
                   <>
-                    Archived {formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt)}
-                    {" \u00b7 Created "}
-                    {formatRelativeTimeLabel(thread.createdAt)}
+                    {t("settings.archive.archivedAndCreated", {
+                      archived: formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt),
+                      created: formatRelativeTimeLabel(thread.createdAt),
+                    })}
                   </>
                 }
                 control={
@@ -2626,9 +2627,9 @@ export function ArchivedThreadsPanel() {
                           toastManager.add(
                             stackedThreadToast({
                               type: "error",
-                              title: "Failed to unarchive thread",
+                              title: t("settings.archive.failedToUnarchive"),
                               description:
-                                error instanceof Error ? error.message : "An error occurred.",
+                                error instanceof Error ? error.message : t("sidebar.errorOccurred"),
                             }),
                           );
                         }
@@ -2636,7 +2637,7 @@ export function ArchivedThreadsPanel() {
                     }}
                   >
                     <ArchiveX className="size-3.5" />
-                    <span>Unarchive</span>
+                    <span>{t("sidebar.unarchiveThread")}</span>
                   </Button>
                 }
               />

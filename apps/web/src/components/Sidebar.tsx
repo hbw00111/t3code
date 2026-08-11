@@ -2256,7 +2256,7 @@ export default function Sidebar() {
         const trimmed = title.trim();
         setRenamingThreadKey(null);
         if (trimmed.length === 0) {
-          toastManager.add({ type: "warning", title: "Thread title cannot be empty" });
+          toastManager.add({ type: "warning", title: t("sidebar.threadTitleRequired") });
           return;
         }
         if (trimmed === originalTitle) return;
@@ -2269,14 +2269,14 @@ export default function Sidebar() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Failed to rename thread",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              title: t("sidebar.renameThreadFailed"),
+              description: error instanceof Error ? error.message : t("sidebar.errorOccurred"),
             }),
           );
         }
       })();
     },
-    [updateThreadMetadata],
+    [t, updateThreadMetadata],
   );
 
   const handleThreadClick = useCallback(

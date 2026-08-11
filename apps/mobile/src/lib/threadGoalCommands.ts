@@ -1,14 +1,11 @@
 import type { EnvironmentId, ServerProviderSlashCommand, ThreadId } from "@t3tools/contracts";
 
 export type ComposerGoalCommand =
+  | { readonly action: "get" }
   | { readonly action: "set"; readonly objective: string }
-  | { readonly action: "pause" | "resume" | "clear" }
-  | { readonly action: "missing-objective" };
+  | { readonly action: "pause" | "resume" | "clear" };
 
-export type ExecutableComposerGoalCommand = Exclude<
-  ComposerGoalCommand,
-  { readonly action: "missing-objective" }
->;
+export type ExecutableComposerGoalCommand = ComposerGoalCommand;
 
 export type ThreadComposerSubmission =
   | { readonly kind: "empty" }
@@ -44,6 +41,7 @@ export function buildThreadComposerSlashCommandItems(input: {
   readonly query: string;
   readonly providerDriver: string | null | undefined;
   readonly providerCommands: ReadonlyArray<ServerProviderSlashCommand>;
+  readonly showInteractionModeToggle: boolean;
 }): ThreadComposerSlashCommandItem[] {
   const query = input.query.toLowerCase();
   const builtIn: ThreadComposerBuiltInSlashCommandItem[] = [
@@ -65,20 +63,24 @@ export function buildThreadComposerSlashCommandItems(input: {
           },
         ]
       : []),
-    {
-      id: "cmd:plan",
-      type: "slash-command",
-      command: "plan",
-      label: "/plan",
-      description: "Switch to plan mode",
-    },
-    {
-      id: "cmd:default",
-      type: "slash-command",
-      command: "default",
-      label: "/default",
-      description: "Switch to default mode",
-    },
+    ...(input.showInteractionModeToggle
+      ? [
+          {
+            id: "cmd:plan",
+            type: "slash-command" as const,
+            command: "plan" as const,
+            label: "/plan",
+            description: "Switch to plan mode",
+          },
+          {
+            id: "cmd:default",
+            type: "slash-command" as const,
+            command: "default" as const,
+            label: "/default",
+            description: "Switch to default mode",
+          },
+        ]
+      : []),
   ];
 
   const matchingBuiltIn = builtIn.filter((item) => item.command.includes(query));
@@ -107,7 +109,7 @@ export function parseComposerGoalCommand(text: string): ComposerGoalCommand | nu
   if (!match) return null;
 
   const argument = match[1]?.trim() ?? "";
-  if (!argument) return { action: "missing-objective" };
+  if (!argument) return { action: "get" };
 
   const action = argument.toLowerCase();
   if (action === "pause" || action === "resume" || action === "clear") {
@@ -138,6 +140,10 @@ interface GoalCommandTarget {
 }
 
 export interface ThreadGoalOperations<Result> {
+  readonly getGoal: (input: {
+    readonly environmentId: EnvironmentId;
+    readonly input: { readonly threadId: ThreadId };
+  }) => Promise<Result>;
   readonly setGoal: (input: {
     readonly environmentId: EnvironmentId;
     readonly input: { readonly threadId: ThreadId; readonly objective: string };
@@ -166,6 +172,8 @@ export function dispatchThreadGoalCommand<Result>(input: {
     input: { threadId: input.target.threadId },
   };
   switch (input.command.action) {
+    case "get":
+      return input.operations.getGoal(target);
     case "set":
       return input.operations.setGoal({
         environmentId: target.environmentId,

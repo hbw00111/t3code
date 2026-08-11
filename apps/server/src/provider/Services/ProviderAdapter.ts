@@ -17,6 +17,7 @@ import type {
   ProviderSession,
   ProviderSessionStartInput,
   ProviderThreadGoalInput,
+  ProviderThreadGoalResult,
   ThreadId,
   ProviderTurnStartResult,
   TurnId,
@@ -67,7 +68,9 @@ export interface ProviderAdapterShape<TError> {
   /**
    * Update a provider-native thread goal when that provider exposes one.
    */
-  readonly setThreadGoal?: (input: ProviderThreadGoalInput) => Effect.Effect<void, TError>;
+  readonly setThreadGoal?: (
+    input: ProviderThreadGoalInput,
+  ) => Effect.Effect<ProviderThreadGoalResult, TError>;
 
   /**
    * Interrupt an active turn.

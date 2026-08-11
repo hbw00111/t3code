@@ -46,6 +46,7 @@ export type UpdateThreadMetadataInput = CommandInput<"thread.meta.update">;
 export type SetThreadRuntimeModeInput = CommandInput<"thread.runtime-mode.set">;
 export type SetThreadInteractionModeInput = CommandInput<"thread.interaction-mode.set">;
 export type StartThreadTurnInput = CommandInput<"thread.turn.start">;
+export type GetThreadGoalInput = CommandInput<"thread.goal.get">;
 export type SetThreadGoalInput = CommandInput<"thread.goal.set">;
 export type PauseThreadGoalInput = CommandInput<"thread.goal.pause">;
 export type ResumeThreadGoalInput = CommandInput<"thread.goal.resume">;
@@ -274,6 +275,18 @@ export const startThreadTurn: (input: StartThreadTurnInput) => CommandEffect = E
   return yield* dispatch({
     ...input,
     type: "thread.turn.start",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const getThreadGoal: (input: GetThreadGoalInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.getThreadGoal",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.goal.get",
     commandId: metadata.commandId,
     createdAt: metadata.createdAt,
   });

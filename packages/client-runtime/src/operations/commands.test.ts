@@ -25,6 +25,7 @@ import {
   archiveThread,
   clearThreadGoal,
   createProject,
+  getThreadGoal,
   pauseThreadGoal,
   resumeThreadGoal,
   settleThread,
@@ -188,6 +189,7 @@ describe("environment commands", () => {
         supervisor,
       );
 
+      yield* getThreadGoal({ commandId, threadId, createdAt }).pipe(provideSupervisor);
       yield* setThreadGoal({
         commandId,
         threadId,
@@ -199,6 +201,7 @@ describe("environment commands", () => {
       yield* clearThreadGoal({ commandId, threadId, createdAt }).pipe(provideSupervisor);
 
       expect(dispatched).toEqual([
+        { type: "thread.goal.get", commandId, threadId, createdAt },
         {
           type: "thread.goal.set",
           commandId,

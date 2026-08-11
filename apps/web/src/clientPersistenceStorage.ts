@@ -28,3 +28,23 @@ export function writeBrowserClientSettings(settings: ClientSettings): void {
 
   setLocalStorageItem(CLIENT_SETTINGS_STORAGE_KEY, settings, ClientSettingsSchema);
 }
+
+export function subscribeBrowserClientSettings(
+  listener: (settings: ClientSettings | null) => void,
+): () => void {
+  if (!hasWindow() || window.desktopBridge !== undefined) {
+    return () => undefined;
+  }
+
+  const handleStorage = (event: StorageEvent) => {
+    if (
+      event.key !== CLIENT_SETTINGS_STORAGE_KEY ||
+      (event.storageArea !== null && event.storageArea !== window.localStorage)
+    ) {
+      return;
+    }
+    listener(readBrowserClientSettings());
+  };
+  window.addEventListener("storage", handleStorage);
+  return () => window.removeEventListener("storage", handleStorage);
+}

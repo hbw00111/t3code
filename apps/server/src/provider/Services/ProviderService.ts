@@ -22,6 +22,7 @@ import type {
   ProviderSessionStartInput,
   ProviderStopSessionInput,
   ProviderThreadGoalInput,
+  ProviderThreadGoalResult,
   ThreadId,
   ProviderTurnStartResult,
 } from "@t3tools/contracts";
@@ -57,7 +58,7 @@ export interface ProviderServiceShape {
    */
   readonly setThreadGoal: (
     input: ProviderThreadGoalInput,
-  ) => Effect.Effect<void, ProviderServiceError>;
+  ) => Effect.Effect<ProviderThreadGoalResult, ProviderServiceError>;
 
   /**
    * Interrupt a running provider turn.

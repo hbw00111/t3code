@@ -28,6 +28,8 @@ describe("translation resources", () => {
     expect(zhCN.desktopUpdate.restartToUpdate).toBe("重启并更新");
     expect(zhCN.providerUpdate.dismissNotice).toBe("忽略模型服务更新提示");
     expect(zhCN.providerUpdate.updateFailed).toBe("模型服务更新失败");
+    expect(en.chat.togglePlanMode).toBe("Switch to plan mode");
+    expect(zhCN.chat.togglePlanMode).toBe("切换到计划模式");
   });
 
   it("formats sidebar counts in both supported languages", () => {

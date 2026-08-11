@@ -16,6 +16,7 @@ describe("mobile thread goal commands", () => {
         query: "",
         providerDriver,
         providerCommands: [],
+        showInteractionModeToggle: true,
       }).map((item) => item.label);
 
     expect(commandsFor("codex")).toContain("/goal");
@@ -29,11 +30,23 @@ describe("mobile thread goal commands", () => {
         query: "goal",
         providerDriver: "claudeAgent",
         providerCommands: [{ name: "goal", description: "Provider goal" }],
+        showInteractionModeToggle: true,
       }),
     ).toEqual([]);
   });
 
-  it("parses set, pause, resume, clear, and a missing objective", () => {
+  it("hides interaction mode commands when the provider does not support them", () => {
+    expect(
+      buildThreadComposerSlashCommandItems({
+        query: "",
+        providerDriver: "grok",
+        providerCommands: [],
+        showInteractionModeToggle: false,
+      }).map((item) => item.label),
+    ).not.toEqual(expect.arrayContaining(["/plan", "/default"]));
+  });
+
+  it("parses get, set, pause, resume, and clear", () => {
     expect(parseComposerGoalCommand("/goal Ship the mobile UI")).toEqual({
       action: "set",
       objective: "Ship the mobile UI",
@@ -41,7 +54,7 @@ describe("mobile thread goal commands", () => {
     expect(parseComposerGoalCommand("/goal PAUSE")).toEqual({ action: "pause" });
     expect(parseComposerGoalCommand(" /goal resume ")).toEqual({ action: "resume" });
     expect(parseComposerGoalCommand("/goal clear")).toEqual({ action: "clear" });
-    expect(parseComposerGoalCommand("/goal ")).toEqual({ action: "missing-objective" });
+    expect(parseComposerGoalCommand("/goal ")).toEqual({ action: "get" });
     expect(parseComposerGoalCommand("send a normal message")).toBeNull();
   });
 
@@ -60,10 +73,11 @@ describe("mobile thread goal commands", () => {
     });
   });
 
-  it.each(["set", "pause", "resume", "clear"] as const)(
+  it.each(["get", "set", "pause", "resume", "clear"] as const)(
     "dispatches %s through the matching client-runtime operation",
     async (action) => {
       const operations = {
+        getGoal: vi.fn(async () => "get"),
         setGoal: vi.fn(async () => "set"),
         pauseGoal: vi.fn(async () => "pause"),
         resumeGoal: vi.fn(async () => "resume"),

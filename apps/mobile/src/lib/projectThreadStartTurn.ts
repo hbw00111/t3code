@@ -87,3 +87,53 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
     createdAt: spec.createdAt,
   };
 }
+
+export interface ProjectThreadGoalSpec {
+  readonly projectId: ProjectId;
+  readonly projectCwd: string;
+  readonly threadId: string;
+  readonly commandId: string;
+  readonly createdAt: string;
+  readonly objective: string;
+  readonly modelSelection: ModelSelection;
+  readonly runtimeMode: RuntimeMode;
+  readonly workspaceMode: "local" | "worktree";
+  readonly branch: string | null;
+  readonly worktreePath: string | null;
+  readonly startFromOrigin: boolean;
+  readonly worktreeBranchName: string;
+}
+
+export function buildProjectThreadGoalInput(spec: ProjectThreadGoalSpec) {
+  const title = deriveThreadTitleFromPrompt(spec.objective);
+  const isWorktree = spec.workspaceMode === "worktree";
+  return {
+    commandId: CommandId.make(spec.commandId),
+    threadId: ThreadId.make(spec.threadId),
+    objective: spec.objective,
+    bootstrap: {
+      createThread: {
+        projectId: spec.projectId,
+        title,
+        modelSelection: spec.modelSelection,
+        runtimeMode: spec.runtimeMode,
+        interactionMode: "default" as const,
+        branch: spec.branch,
+        worktreePath: isWorktree ? null : spec.worktreePath,
+        createdAt: spec.createdAt,
+      },
+      ...(isWorktree
+        ? {
+            prepareWorktree: {
+              projectCwd: spec.projectCwd,
+              baseBranch: spec.branch!,
+              branch: spec.worktreeBranchName,
+              ...(spec.startFromOrigin ? { startFromOrigin: true } : {}),
+            },
+            runSetupScript: true,
+          }
+        : {}),
+    },
+    createdAt: spec.createdAt,
+  };
+}

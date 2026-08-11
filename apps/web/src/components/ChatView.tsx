@@ -22,10 +22,7 @@ import {
   RuntimeMode,
   TerminalOpenInput,
 } from "@t3tools/contracts";
-import {
-  connectionStatusTitle,
-  type EnvironmentConnectionPresentation,
-} from "@t3tools/client-runtime/connection";
+import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
 import {
   effectiveSettled,
   effectiveSnoozed,
@@ -77,6 +74,8 @@ import { readLocalApi } from "../localApi";
 import { useDiffPanelStore } from "../diffPanelStore";
 import {
   collapseExpandedComposerCursor,
+  goalCommandExitsPlanMode,
+  goalCommandIsReadOnly,
   parseComposerGoalCommand,
   parseStandaloneComposerSlashCommand,
 } from "../composer-logic";
@@ -218,6 +217,7 @@ import { environmentCatalog } from "../connection/catalog";
 import {
   providerSupportsThreadGoals,
   threadGoalActivityTranslationKey,
+  threadGoalActivityTranslationValues,
 } from "../threadGoalActivity";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
@@ -337,7 +337,6 @@ import {
   isVersionMismatchDismissed,
   resolveServerConfigVersionMismatch,
   resolveServerSelfUpdateCapability,
-  serverUpdateGuidance,
 } from "../versionSkew";
 import { useAssetUrls } from "../assets/assetUrls";
 
@@ -1211,6 +1210,7 @@ function ChatViewContent(props: ChatViewProps) {
   const setThreadInteractionMode = useAtomCommand(threadEnvironment.setInteractionMode, {
     reportFailure: false,
   });
+  const getThreadGoal = useAtomCommand(threadEnvironment.getGoal, { reportFailure: false });
   const setThreadGoal = useAtomCommand(threadEnvironment.setGoal, { reportFailure: false });
   const pauseThreadGoal = useAtomCommand(threadEnvironment.pauseGoal, { reportFailure: false });
   const resumeThreadGoal = useAtomCommand(threadEnvironment.resumeGoal, { reportFailure: false });
@@ -1782,13 +1782,13 @@ function ChatViewContent(props: ChatViewProps) {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Could not reconnect environment",
-            description: error instanceof Error ? error.message : "Failed to reconnect.",
+            title: t("chat.couldNotReconnectEnvironment"),
+            description: error instanceof Error ? error.message : t("chat.failedToReconnect"),
           }),
         );
       }
     },
-    [retryEnvironment],
+    [retryEnvironment, t],
   );
   const logicalProjectEnvironments = useMemo(() => {
     if (!activeProject) return [];
@@ -1968,8 +1968,13 @@ function ChatViewContent(props: ChatViewProps) {
   const hasMultipleRegisteredEnvironments = environments.length > 1;
   const versionMismatchServerLabel =
     hasMultipleRegisteredEnvironments && activeThread
-      ? `${environmentById.get(activeThread.environmentId)?.label ?? serverConfig?.environment.label ?? activeThread.environmentId} server`
-      : "server";
+      ? t("chat.serverNamed", {
+          environment:
+            environmentById.get(activeThread.environmentId)?.label ??
+            serverConfig?.environment.label ??
+            activeThread.environmentId,
+        })
+      : t("chat.server");
   const serverUpdateEnvironmentId = activeThread?.environmentId ?? null;
   const versionMismatchSelfUpdate = resolveServerSelfUpdateCapability(serverConfig);
   const serverUpdateState = useAtomValue(
@@ -2010,18 +2015,41 @@ function ChatViewContent(props: ChatViewProps) {
               aria-hidden="true"
             />
           ),
-          title: `${unavailableConnection.phase === "connecting" ? "Connecting" : "Reconnecting"} to ${activeEnvironmentUnavailableState.label}`,
-          description: "It may be finishing an update. One moment.",
+          title: t(
+            unavailableConnection.phase === "connecting"
+              ? "chat.connectingToEnvironment"
+              : "chat.reconnectingToEnvironment",
+            { environment: activeEnvironmentUnavailableState.label },
+          ),
+          description: t("chat.finishingUpdate"),
         });
       } else {
+        const connectionTitle = (() => {
+          switch (unavailableConnection.phase) {
+            case "available":
+              return t("chat.connectionAvailable");
+            case "offline":
+              return t("chat.connectionOffline");
+            case "connecting":
+              return t("chat.connecting");
+            case "reconnecting":
+              return t(
+                unavailableConnection.error
+                  ? "chat.connectionFailedReconnecting"
+                  : "chat.connectionReconnecting",
+              );
+            case "connected":
+              return t("chat.connectionConnected");
+            case "error":
+              return t("chat.connectionFailed");
+          }
+        })();
         items.push({
           id: `environment-unavailable:${activeEnvironmentUnavailableState.environmentId}`,
           variant: unavailableConnection.phase === "error" ? "error" : "warning",
           icon: <WifiOffIcon />,
-          title: `${activeEnvironmentUnavailableState.label}: ${connectionStatusTitle(unavailableConnection)}`,
-          description:
-            unavailableConnection.error ??
-            "Reconnect this environment before sending messages or running actions.",
+          title: `${activeEnvironmentUnavailableState.label}: ${connectionTitle}`,
+          description: unavailableConnection.error ?? t("chat.reconnectEnvironmentDescription"),
           actions: (
             <>
               <Button
@@ -2033,14 +2061,14 @@ function ChatViewContent(props: ChatViewProps) {
                   )
                 }
               >
-                {environmentReconnecting ? "Reconnecting..." : "Reconnect"}
+                {environmentReconnecting ? t("chat.reconnecting") : t("chat.reconnect")}
               </Button>
               <Button
                 size="xs"
                 variant="outline"
                 onClick={() => void navigate({ to: "/settings/connections" })}
               >
-                Connections
+                {t("chat.connections")}
               </Button>
             </>
           ),
@@ -2072,13 +2100,15 @@ function ChatViewContent(props: ChatViewProps) {
           ),
         title:
           updateInProgress || updateFailed ? (
-            `${updateFailed ? "Could not update" : "Updating"} ${versionMismatchServerLabel}`
+            t(updateFailed ? "chat.serverUpdateCouldNotUpdate" : "chat.serverUpdating", {
+              server: versionMismatchServerLabel,
+            })
           ) : versionMismatch ? (
             <Tooltip>
               <TooltipTrigger
                 render={
                   <button type="button" className="cursor-help rounded-sm text-left">
-                    Server update available
+                    {t("chat.serverUpdateAvailable")}
                   </button>
                 }
               />
@@ -2088,13 +2118,13 @@ function ChatViewContent(props: ChatViewProps) {
               </TooltipPopup>
             </Tooltip>
           ) : (
-            "Server update available"
+            t("chat.serverUpdateAvailable")
           ),
         description:
           updateInProgress || updateFailed ? (
             <ServerUpdateProgress state={serverUpdateState} />
           ) : versionMismatchSelfUpdate === "desktop-managed" ? (
-            serverUpdateGuidance(versionMismatchSelfUpdate, versionMismatchServerLabel)
+            t("chat.serverUpdateDesktopManaged", { server: versionMismatchServerLabel })
           ) : null,
         // The desktop-managed guidance is already the description; the action
         // slot would only repeat it.
@@ -2107,13 +2137,13 @@ function ChatViewContent(props: ChatViewProps) {
               serverLabel={versionMismatchServerLabel}
               selfUpdate={versionMismatchSelfUpdate}
               targetVersion={versionMismatch.clientVersion}
-              label={updateFailed ? "Retry" : "Update"}
+              label={updateFailed ? t("common.retry") : t("common.update")}
             />
           ),
         ...(updateInProgress || updateFailed || !versionMismatchDismissKey
           ? {}
           : {
-              dismissLabel: "Dismiss update notice",
+              dismissLabel: t("chat.dismissUpdateNotice"),
               onDismiss: () => {
                 dismissVersionMismatch(versionMismatchDismissKey);
                 setDismissedVersionMismatchKey(versionMismatchDismissKey);
@@ -2135,6 +2165,7 @@ function ChatViewContent(props: ChatViewProps) {
     serverUpdateEnvironmentId,
     versionMismatchSelfUpdate,
     versionMismatchServerLabel,
+    t,
   ]);
   const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
   const unlockedSelectedProvider = resolveSelectableProvider(
@@ -2149,7 +2180,15 @@ function ChatViewContent(props: ChatViewProps) {
       deriveWorkLogEntries(
         threadActivities.map((activity) => {
           const translationKey = threadGoalActivityTranslationKey(activity);
-          return translationKey ? { ...activity, summary: t(translationKey) } : activity;
+          if (!translationKey) return activity;
+          const translationValues = threadGoalActivityTranslationValues(activity);
+          return {
+            ...activity,
+            summary:
+              translationValues === undefined
+                ? t(translationKey)
+                : t(translationKey, translationValues),
+          };
         }),
       ),
     [t, threadActivities],
@@ -4143,15 +4182,15 @@ function ChatViewContent(props: ChatViewProps) {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Failed to un-settle thread",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            title: t("chat.failedToUnsettleThread"),
+            description: error instanceof Error ? error.message : t("sidebar.errorOccurred"),
           }),
         );
       }
     } finally {
       setUnsettlingThreadKey((current) => (current === threadKey ? null : current));
     }
-  }, [activeThreadRef, unsettleThreadMutation]);
+  }, [activeThreadRef, t, unsettleThreadMutation]);
   const unsnoozeThreadMutation = useAtomCommand(threadEnvironment.unsnooze, {
     reportFailure: false,
   });
@@ -4171,15 +4210,15 @@ function ChatViewContent(props: ChatViewProps) {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Failed to wake thread",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            title: t("chat.failedToWakeThread"),
+            description: error instanceof Error ? error.message : t("sidebar.errorOccurred"),
           }),
         );
       }
     } finally {
       setUnsnoozingThreadKey((current) => (current === threadKey ? null : current));
     }
-  }, [activeThreadRef, unsnoozeThreadMutation]);
+  }, [activeThreadRef, t, unsnoozeThreadMutation]);
   const [isRestoringThreadBranch, setIsRestoringThreadBranch] = useState(false);
   const [branchRestoreConfirmOpen, setBranchRestoreConfirmOpen] = useState(false);
   // Once revealed for a given mismatch, the banner stays mounted until the
@@ -4244,7 +4283,7 @@ function ChatViewContent(props: ChatViewProps) {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Failed to switch checkout",
+            title: t("chat.checkoutSwitchFailed"),
             description: chatActionErrorMessage(squashAtomCommandFailure(checkoutResult)),
           }),
         );
@@ -4264,7 +4303,7 @@ function ChatViewContent(props: ChatViewProps) {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Checkout switched, but the thread could not be updated",
+              title: t("chat.checkoutThreadUpdateFailed"),
               description: chatActionErrorMessage(squashAtomCommandFailure(updateResult)),
             }),
           );
@@ -4285,6 +4324,7 @@ function ChatViewContent(props: ChatViewProps) {
     localCheckoutBranchMismatch,
     scheduleComposerFocus,
     switchGitRef,
+    t,
     updateThreadMetadata,
   ]);
   // Background work (subagent fleets, workflow runs, watch loops) can outlive
@@ -4323,11 +4363,11 @@ function ChatViewContent(props: ChatViewProps) {
         const error = squashAtomCommandFailure(result);
         setThreadError(
           activeThread.id,
-          error instanceof Error ? error.message : "Failed to stop background work.",
+          error instanceof Error ? error.message : t("chat.backgroundStopFailed"),
         );
       }
     }
-  }, [activeThread, environmentId, interruptThreadTurn, setThreadError]);
+  }, [activeThread, environmentId, interruptThreadTurn, setThreadError, t]);
   const backgroundLivenessBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
     if (activeBackgroundLiveness === null || !activeThread) {
       return null;
@@ -4345,9 +4385,9 @@ function ChatViewContent(props: ChatViewProps) {
       ),
       title: working
         ? liveCount > 0
-          ? `${liveCount} ${liveCount === 1 ? "agent" : "agents"} working in the background`
-          : "Background work running"
-        : "Monitoring in the background",
+          ? t("chat.backgroundAgentsWorking", { count: liveCount })
+          : t("chat.backgroundRunning")
+        : t("chat.backgroundMonitoring"),
       actions: (
         <Button
           size="xs"
@@ -4355,7 +4395,7 @@ function ChatViewContent(props: ChatViewProps) {
           disabled={isStoppingBackgroundWork}
           onClick={() => void handleStopBackgroundWork()}
         >
-          {isStoppingBackgroundWork ? "Stopping..." : "Stop"}
+          {isStoppingBackgroundWork ? t("chat.stoppingBackground") : t("chat.stopBackground")}
         </Button>
       ),
     };
@@ -4365,6 +4405,7 @@ function ChatViewContent(props: ChatViewProps) {
     agentPanelModel.liveCount,
     handleStopBackgroundWork,
     isStoppingBackgroundWork,
+    t,
   ]);
   // A woken thread announces itself in the open view, not just the sidebar
   // pill. Dismissing marks the wake as seen (same acknowledgment as the
@@ -4377,12 +4418,12 @@ function ChatViewContent(props: ChatViewProps) {
       id: `thread-woke:${activeThread?.id ?? "unknown"}`,
       variant: "info",
       icon: <AlarmClockIcon />,
-      title: "This thread woke from snooze",
-      description: "Dismiss to clear the Woke indicator, or send a message to keep going.",
-      dismissLabel: "Dismiss Woke notification",
+      title: t("chat.threadWoke"),
+      description: t("chat.dismissWokeDescription"),
+      dismissLabel: t("sidebar.dismissWoke"),
       onDismiss: acknowledgeActiveThreadWoke,
     };
-  }, [acknowledgeActiveThreadWoke, activeThread?.id, activeThreadWokeVisible]);
+  }, [acknowledgeActiveThreadWoke, activeThread?.id, activeThreadWokeVisible, t]);
   // The stack renders items[0] front-most and tucks the rest behind hover, so
   // ordering is priority: urgent system banners (error/warning variants plus
   // calm-styled live states flagged `urgent`, like update progress), then
@@ -4399,10 +4440,10 @@ function ChatViewContent(props: ChatViewProps) {
       id: `thread-${isSnoozed ? "snoozed" : "settled"}:${activeThread?.id ?? "unknown"}`,
       variant: "info",
       icon: isSnoozed ? <AlarmClockIcon /> : <CheckCircle2Icon />,
-      title: `This thread is ${isSnoozed ? "snoozed" : "settled"}`,
+      title: t(isSnoozed ? "chat.threadIsSnoozed" : "chat.threadIsSettled"),
       description: isSnoozed
-        ? "Sending a message wakes it and moves it back to Active in the sidebar."
-        : "Sending a message moves it back to Active in the sidebar.",
+        ? t("chat.threadSnoozedDescription")
+        : t("chat.threadSettledDescription"),
       actions: (
         <Button
           size="xs"
@@ -4414,11 +4455,11 @@ function ChatViewContent(props: ChatViewProps) {
         >
           {isSnoozed
             ? isUnsnoozing
-              ? "Waking..."
-              : "Wake now"
+              ? t("chat.threadWaking")
+              : t("chat.threadWakeNow")
             : isUnsettling
-              ? "Un-settling..."
-              : "Un-settle"}
+              ? t("chat.threadUnsettling")
+              : t("chat.threadUnsettle")}
         </Button>
       ),
     };
@@ -4430,6 +4471,7 @@ function ChatViewContent(props: ChatViewProps) {
     handleUnsettleActiveThread,
     isUnsnoozing,
     isUnsettling,
+    t,
   ]);
   const handleRestoreThreadBranch = useCallback(() => {
     if (gitStatusQuery.data?.hasWorkingTreeChanges) {
@@ -4467,7 +4509,9 @@ function ChatViewContent(props: ChatViewProps) {
         icon: <GitBranchIcon />,
         title: (
           <span className="flex min-w-0 items-baseline gap-1.5">
-            <span className="shrink-0 font-normal text-muted-foreground">Branch changed — was</span>
+            <span className="shrink-0 font-normal text-muted-foreground">
+              {t("chat.branchChangedWas")}
+            </span>
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -4477,8 +4521,10 @@ function ChatViewContent(props: ChatViewProps) {
                 }
               />
               <TooltipPopup side="top" className="max-w-80">
-                This thread last ran on {localCheckoutBranchMismatch.threadBranch}. Sending will
-                continue on {localCheckoutBranchMismatch.currentBranch}.
+                {t("chat.branchChangedDescription", {
+                  previous: localCheckoutBranchMismatch.threadBranch,
+                  current: localCheckoutBranchMismatch.currentBranch,
+                })}
               </TooltipPopup>
             </Tooltip>
           </span>
@@ -4491,10 +4537,10 @@ function ChatViewContent(props: ChatViewProps) {
             disabled={isRestoringThreadBranch}
             onClick={handleRestoreThreadBranch}
           >
-            {isRestoringThreadBranch ? "Restoring..." : "Restore branch"}
+            {isRestoringThreadBranch ? t("chat.restoring") : t("chat.restoreBranch")}
           </Button>
         ),
-        dismissLabel: "Dismiss branch change notice",
+        dismissLabel: t("chat.dismissBranchChange"),
         onDismiss: () => {
           dismissBranchMismatchForSession(activeBranchMismatchKey);
           setBranchMismatchDismissTick((tick) => tick + 1);
@@ -4511,6 +4557,7 @@ function ChatViewContent(props: ChatViewProps) {
     parkedThreadBannerItem,
     showBranchMismatchBanner,
     systemComposerBannerItems,
+    t,
     wokeThreadBannerItem,
   ]);
 
@@ -4781,7 +4828,7 @@ function ChatViewContent(props: ChatViewProps) {
         const error = squashAtomCommandFailure(result);
         setThreadError(
           activeThread.id,
-          error instanceof Error ? error.message : "Failed to revert thread state.",
+          error instanceof Error ? error.message : t("chat.failedToRevertThread"),
         );
       }
       setIsRevertingCheckpoint(false);
@@ -4797,6 +4844,7 @@ function ChatViewContent(props: ChatViewProps) {
       phase,
       revertThreadCheckpoint,
       setThreadError,
+      t,
     ],
   );
 
@@ -4813,8 +4861,8 @@ function ChatViewContent(props: ChatViewProps) {
       toastManager.add(
         stackedThreadToast({
           type: "info",
-          title: "Annotation attached to draft",
-          description: "Sending is unavailable right now. Finish the current action, then send.",
+          title: t("chat.annotationAttachedToDraft"),
+          description: t("chat.annotationSendUnavailable"),
         }),
       );
     };
@@ -4832,8 +4880,8 @@ function ChatViewContent(props: ChatViewProps) {
       toastManager.add(
         stackedThreadToast({
           type: "warning",
-          title: "Not connected: message not sent",
-          description: "Reconnecting to the environment. Try again once it is connected.",
+          title: t("chat.notConnectedMessageNotSent"),
+          description: t("chat.reconnectingTryAgain"),
         }),
       );
       return;
@@ -4908,16 +4956,6 @@ function ChatViewContent(props: ChatViewProps) {
         ? parseComposerGoalCommand(trimmed)
         : null;
     if (goalCommand) {
-      if (goalCommand.action === "missing-objective") {
-        toastManager.add(
-          stackedThreadToast({
-            type: "warning",
-            title: t("chat.goalObjectiveRequired"),
-            description: t("chat.goalObjectiveRequiredDescription"),
-          }),
-        );
-        return;
-      }
       if (!activeProject) {
         toastManager.add(
           stackedThreadToast({
@@ -4968,7 +5006,7 @@ function ChatViewContent(props: ChatViewProps) {
         setThreadError(threadIdForGoal, t("chat.selectBaseBranchBeforeGoalInWorktreeMode"));
         return;
       }
-      if (interactionMode === "plan") {
+      if (interactionMode === "plan" && goalCommandExitsPlanMode(goalCommand)) {
         handleInteractionModeChange("default");
       }
 
@@ -4982,63 +5020,68 @@ function ChatViewContent(props: ChatViewProps) {
       setThreadError(threadIdForGoal, null);
 
       const goalResult =
-        goalCommand.action === "set"
-          ? await setThreadGoal({
+        goalCommand.action === "get"
+          ? await getThreadGoal({
               environmentId,
-              input: {
-                threadId: threadIdForGoal,
-                objective: goalCommand.objective,
-                ...((isLocalDraftThread || baseBranchForGoalWorktree) && {
-                  bootstrap: {
-                    ...(isLocalDraftThread
-                      ? {
-                          createThread: {
-                            projectId: activeProject.id,
-                            title: truncate(goalCommand.objective),
-                            modelSelection: createModelSelection(
-                              ctxSelectedModelSelection.instanceId,
-                              ctxSelectedModel ||
-                                activeProject.defaultModelSelection?.model ||
-                                DEFAULT_MODEL,
-                              ctxSelectedModelSelection.options,
-                            ),
-                            runtimeMode,
-                            interactionMode: "default",
-                            branch: activeThreadBranch,
-                            worktreePath: activeThread.worktreePath,
-                            createdAt,
-                          },
-                        }
-                      : {}),
-                    ...(baseBranchForGoalWorktree
-                      ? {
-                          prepareWorktree: {
-                            projectCwd: activeProject.workspaceRoot,
-                            baseBranch: baseBranchForGoalWorktree,
-                            branch: buildTemporaryWorktreeBranchName(randomHex),
-                            ...(startFromOrigin ? { startFromOrigin: true } : {}),
-                          },
-                          runSetupScript: true,
-                        }
-                      : {}),
-                  },
-                }),
-              },
+              input: { threadId: threadIdForGoal },
             })
-          : goalCommand.action === "pause"
-            ? await pauseThreadGoal({
+          : goalCommand.action === "set"
+            ? await setThreadGoal({
                 environmentId,
-                input: { threadId: threadIdForGoal },
+                input: {
+                  threadId: threadIdForGoal,
+                  objective: goalCommand.objective,
+                  ...((isLocalDraftThread || baseBranchForGoalWorktree) && {
+                    bootstrap: {
+                      ...(isLocalDraftThread
+                        ? {
+                            createThread: {
+                              projectId: activeProject.id,
+                              title: truncate(goalCommand.objective),
+                              modelSelection: createModelSelection(
+                                ctxSelectedModelSelection.instanceId,
+                                ctxSelectedModel ||
+                                  activeProject.defaultModelSelection?.model ||
+                                  DEFAULT_MODEL,
+                                ctxSelectedModelSelection.options,
+                              ),
+                              runtimeMode,
+                              interactionMode: "default",
+                              branch: activeThreadBranch,
+                              worktreePath: activeThread.worktreePath,
+                              createdAt,
+                            },
+                          }
+                        : {}),
+                      ...(baseBranchForGoalWorktree
+                        ? {
+                            prepareWorktree: {
+                              projectCwd: activeProject.workspaceRoot,
+                              baseBranch: baseBranchForGoalWorktree,
+                              branch: buildTemporaryWorktreeBranchName(randomHex),
+                              ...(startFromOrigin ? { startFromOrigin: true } : {}),
+                            },
+                            runSetupScript: true,
+                          }
+                        : {}),
+                    },
+                  }),
+                },
               })
-            : goalCommand.action === "resume"
-              ? await resumeThreadGoal({
+            : goalCommand.action === "pause"
+              ? await pauseThreadGoal({
                   environmentId,
                   input: { threadId: threadIdForGoal },
                 })
-              : await clearThreadGoal({
-                  environmentId,
-                  input: { threadId: threadIdForGoal },
-                });
+              : goalCommand.action === "resume"
+                ? await resumeThreadGoal({
+                    environmentId,
+                    input: { threadId: threadIdForGoal },
+                  })
+                : await clearThreadGoal({
+                    environmentId,
+                    input: { threadId: threadIdForGoal },
+                  });
 
       sendInFlightRef.current = false;
       if (goalResult._tag === "Failure") {
@@ -5058,7 +5101,9 @@ function ChatViewContent(props: ChatViewProps) {
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
-      acknowledgeActiveThreadWoke();
+      if (!goalCommandIsReadOnly(goalCommand)) {
+        acknowledgeActiveThreadWoke();
+      }
       return;
     }
     if (!directAnnotation && showPlanFollowUpPrompt && activeProposedPlan) {
@@ -6310,13 +6355,13 @@ function ChatViewContent(props: ChatViewProps) {
                 >
                   <button
                     type="button"
-                    aria-label="Scroll to end"
-                    title="Scroll to end"
+                    aria-label={t("chat.scrollToEnd")}
+                    title={t("chat.scrollToEnd")}
                     onClick={() => scrollToEnd(true)}
                     className="chat-composer-glass pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 px-3 py-1 text-muted-foreground text-xs shadow-sm transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
                   >
                     <ChevronDownIcon className="size-3.5" />
-                    Scroll to end
+                    {t("chat.scrollToEnd")}
                   </button>
                 </div>
               )}
@@ -6520,19 +6565,18 @@ function ChatViewContent(props: ChatViewProps) {
               <AlertDialogPopup>
                 <AlertDialogHeader>
                   <AlertDialogTitle>
-                    Switch to{" "}
-                    <code className="font-medium">
-                      {localCheckoutBranchMismatch?.threadBranch ?? ""}
-                    </code>
-                    ?
+                    {t("chat.switchToBranch", {
+                      branch: localCheckoutBranchMismatch?.threadBranch ?? "",
+                    })}
                   </AlertDialogTitle>
                   <AlertDialogDescription>
-                    You have uncommitted changes. They'll carry over to the other branch, or block
-                    the switch if they conflict.
+                    {t("chat.switchBranchWithChangesDescription")}
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
-                  <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+                  <AlertDialogClose render={<Button variant="outline" />}>
+                    {t("common.cancel")}
+                  </AlertDialogClose>
                   <Button
                     variant="default"
                     onClick={() => {
@@ -6540,7 +6584,7 @@ function ChatViewContent(props: ChatViewProps) {
                       void handleSwitchCheckoutToThread();
                     }}
                   >
-                    Switch branch
+                    {t("chat.switchBranch")}
                   </Button>
                 </AlertDialogFooter>
               </AlertDialogPopup>

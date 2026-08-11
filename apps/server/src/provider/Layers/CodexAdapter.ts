@@ -1852,10 +1852,17 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       );
     }
 
-    const method = input.operation === "clear" ? "thread/goal/clear" : "thread/goal/set";
+    const method =
+      input.operation === "get"
+        ? "thread/goal/get"
+        : input.operation === "clear"
+          ? "thread/goal/clear"
+          : "thread/goal/set";
     return requireSession(input.threadId).pipe(
       Effect.flatMap((session) => {
         switch (input.operation) {
+          case "get":
+            return session.runtime.getGoal();
           case "set":
             return session.runtime.setGoal(input.objective!);
           case "pause":

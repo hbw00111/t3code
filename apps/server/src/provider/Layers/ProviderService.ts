@@ -803,7 +803,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           provider: routed.adapter.provider,
         });
       }
-      yield* setThreadGoal(input);
+      return yield* setThreadGoal(input);
     },
   );
 

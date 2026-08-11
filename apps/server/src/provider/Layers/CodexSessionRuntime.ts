@@ -14,6 +14,7 @@ import {
   type ProviderUserInputAnswers,
   RuntimeMode,
   ThreadId,
+  type ThreadGoalSnapshot,
   TurnId,
 } from "@t3tools/contracts";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
@@ -130,16 +131,33 @@ export interface CodexThreadSnapshot {
   readonly turns: ReadonlyArray<CodexThreadTurnSnapshot>;
 }
 
+type CodexThreadGoal =
+  | EffectCodexSchema.V2ThreadGoalGetResponse__ThreadGoal
+  | EffectCodexSchema.V2ThreadGoalSetResponse__ThreadGoal;
+
+function toThreadGoalSnapshot(goal: CodexThreadGoal): ThreadGoalSnapshot {
+  return {
+    objective: goal.objective,
+    status: goal.status,
+    tokensUsed: goal.tokensUsed,
+    timeUsedSeconds: goal.timeUsedSeconds,
+    ...(goal.tokenBudget !== undefined ? { tokenBudget: goal.tokenBudget } : {}),
+  };
+}
+
 export interface CodexSessionRuntimeShape {
   readonly start: () => Effect.Effect<ProviderSession, CodexSessionRuntimeError>;
   readonly getSession: Effect.Effect<ProviderSession>;
   readonly sendTurn: (
     input: CodexSessionRuntimeSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, CodexSessionRuntimeError>;
-  readonly setGoal: (objective: string) => Effect.Effect<void, CodexSessionRuntimeError>;
-  readonly pauseGoal: () => Effect.Effect<void, CodexSessionRuntimeError>;
-  readonly resumeGoal: () => Effect.Effect<void, CodexSessionRuntimeError>;
-  readonly clearGoal: () => Effect.Effect<void, CodexSessionRuntimeError>;
+  readonly getGoal: () => Effect.Effect<ThreadGoalSnapshot | null, CodexSessionRuntimeError>;
+  readonly setGoal: (
+    objective: string,
+  ) => Effect.Effect<ThreadGoalSnapshot, CodexSessionRuntimeError>;
+  readonly pauseGoal: () => Effect.Effect<ThreadGoalSnapshot, CodexSessionRuntimeError>;
+  readonly resumeGoal: () => Effect.Effect<ThreadGoalSnapshot, CodexSessionRuntimeError>;
+  readonly clearGoal: () => Effect.Effect<null, CodexSessionRuntimeError>;
   readonly interruptTurn: (turnId?: TurnId) => Effect.Effect<void, CodexSessionRuntimeError>;
   readonly readThread: Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
   readonly rollbackThread: (
@@ -1807,30 +1825,41 @@ export const makeCodexSessionRuntime = (
               : {}),
           } satisfies ProviderTurnStartResult;
         }),
+      getGoal: () =>
+        Effect.gen(function* () {
+          const providerThreadId = yield* readProviderThreadId;
+          const response = yield* client.request("thread/goal/get", {
+            threadId: providerThreadId,
+          });
+          return response.goal ? toThreadGoalSnapshot(response.goal) : null;
+        }),
       setGoal: (objective) =>
         Effect.gen(function* () {
           const providerThreadId = yield* readProviderThreadId;
-          yield* client.request("thread/goal/set", {
+          const response = yield* client.request("thread/goal/set", {
             threadId: providerThreadId,
             objective,
             status: "active",
           });
+          return toThreadGoalSnapshot(response.goal);
         }),
       pauseGoal: () =>
         Effect.gen(function* () {
           const providerThreadId = yield* readProviderThreadId;
-          yield* client.request("thread/goal/set", {
+          const response = yield* client.request("thread/goal/set", {
             threadId: providerThreadId,
             status: "paused",
           });
+          return toThreadGoalSnapshot(response.goal);
         }),
       resumeGoal: () =>
         Effect.gen(function* () {
           const providerThreadId = yield* readProviderThreadId;
-          yield* client.request("thread/goal/set", {
+          const response = yield* client.request("thread/goal/set", {
             threadId: providerThreadId,
             status: "active",
           });
+          return toThreadGoalSnapshot(response.goal);
         }),
       clearGoal: () =>
         Effect.gen(function* () {
@@ -1838,6 +1867,7 @@ export const makeCodexSessionRuntime = (
           yield* client.request("thread/goal/clear", {
             threadId: providerThreadId,
           });
+          return null;
         }),
       interruptTurn: (turnId) =>
         Effect.gen(function* () {

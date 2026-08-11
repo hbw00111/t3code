@@ -1,4 +1,9 @@
-import { ApprovalRequestId, isToolLifecycleItemType } from "@t3tools/contracts";
+import {
+  ApprovalRequestId,
+  isToolLifecycleItemType,
+  ThreadGoalActivityPayload,
+  THREAD_GOAL_READ_ACTIVITY_KIND,
+} from "@t3tools/contracts";
 import type {
   OrchestrationLatestTurn,
   OrchestrationThread,
@@ -11,6 +16,7 @@ import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
+import * as Schema from "effect/Schema";
 
 export interface PendingApproval {
   readonly requestId: ApprovalRequestId;
@@ -57,6 +63,7 @@ export interface ThreadFeedActivity {
 }
 
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
+const isThreadGoalActivityPayload = Schema.is(ThreadGoalActivityPayload);
 
 type WorkLogToolLifecycleStatus = "inProgress" | "completed" | "failed" | "declined" | "stopped";
 
@@ -353,6 +360,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       ? payload.detail
       : null;
   const taskLabel = taskSummary || taskDetailAsLabel;
+  const goalReadLabel = formatThreadGoalReadLabel(activity);
   const taskId =
     isTaskActivity && typeof payload?.taskId === "string" && payload.taskId.length > 0
       ? payload.taskId
@@ -362,7 +370,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     createdAt: activity.createdAt,
     turnId: activity.turnId,
     ...(taskId ? { taskId } : {}),
-    label: taskLabel || activity.summary,
+    label: taskLabel || goalReadLabel || activity.summary,
     tone:
       activity.kind === "task.progress"
         ? "thinking"
@@ -420,6 +428,26 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     entry.collapseKey = collapseKey;
   }
   return entry;
+}
+
+function formatThreadGoalReadLabel(activity: OrchestrationThreadActivity): string | null {
+  if (
+    activity.kind !== THREAD_GOAL_READ_ACTIVITY_KIND ||
+    !isThreadGoalActivityPayload(activity.payload)
+  ) {
+    return null;
+  }
+  const goal = activity.payload.goal;
+  if (goal == null) {
+    return "No goal is set";
+  }
+  const status =
+    goal.status === "budgetLimited"
+      ? "budget limited"
+      : goal.status === "usageLimited"
+        ? "usage limited"
+        : goal.status;
+  return `Goal: ${goal.objective} · ${status} · ${goal.tokensUsed} tokens · ${goal.timeUsedSeconds}s`;
 }
 
 function collapseDerivedWorkLogEntries(

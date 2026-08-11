@@ -829,19 +829,47 @@ export const ThreadTurnStartCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
-export const ThreadGoalOperation = Schema.Literals(["set", "pause", "resume", "clear"]);
+export const ThreadGoalOperation = Schema.Literals(["get", "set", "pause", "resume", "clear"]);
 export type ThreadGoalOperation = typeof ThreadGoalOperation.Type;
 
 export const THREAD_GOAL_UPDATED_ACTIVITY_KIND = "provider.thread.goal.updated";
+export const THREAD_GOAL_READ_ACTIVITY_KIND = "provider.thread.goal.read";
 export const THREAD_GOAL_UPDATE_FAILED_ACTIVITY_KIND = "provider.thread.goal.update.failed";
+
+export const ThreadGoalStatus = Schema.Literals([
+  "active",
+  "paused",
+  "blocked",
+  "complete",
+  "budgetLimited",
+  "usageLimited",
+]);
+export type ThreadGoalStatus = typeof ThreadGoalStatus.Type;
+
+export const ThreadGoalSnapshot = Schema.Struct({
+  objective: TrimmedNonEmptyString,
+  status: ThreadGoalStatus,
+  tokensUsed: NonNegativeInt,
+  timeUsedSeconds: NonNegativeInt,
+  tokenBudget: Schema.optional(Schema.NullOr(NonNegativeInt)),
+});
+export type ThreadGoalSnapshot = typeof ThreadGoalSnapshot.Type;
 
 export const ThreadGoalActivityPayload = Schema.Struct({
   commandId: CommandId,
   operation: ThreadGoalOperation,
   objective: Schema.optional(TrimmedNonEmptyString),
+  goal: Schema.optional(Schema.NullOr(ThreadGoalSnapshot)),
   detail: Schema.optional(TrimmedNonEmptyString),
 });
 export type ThreadGoalActivityPayload = typeof ThreadGoalActivityPayload.Type;
+
+export const ThreadGoalGetCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.get"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
 
 export const ThreadGoalSetCommand = Schema.Struct({
   type: Schema.Literal("thread.goal.set"),
@@ -961,6 +989,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ThreadTurnStartCommand,
+  ThreadGoalGetCommand,
   ThreadGoalSetCommand,
   ThreadGoalPauseCommand,
   ThreadGoalResumeCommand,
@@ -993,6 +1022,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ClientThreadTurnStartCommand,
+  ThreadGoalGetCommand,
   ThreadGoalSetCommand,
   ThreadGoalPauseCommand,
   ThreadGoalResumeCommand,

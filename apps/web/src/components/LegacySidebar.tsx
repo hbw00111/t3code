@@ -219,11 +219,6 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   easing: "ease-out",
 } as const;
 const EMPTY_THREAD_JUMP_LABELS = new Map<string, string>();
-const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
-  repository: "Group by repository",
-  repository_path: "Group by repository path",
-  separate: "Keep separate",
-};
 const SIDEBAR_ICON_ACTION_BUTTON_CLASS =
   "inline-flex h-6 min-w-6 cursor-pointer items-center justify-center rounded-md px-[calc(--spacing(1)-1px)] text-icon-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
 
@@ -258,17 +253,6 @@ function projectExpansionPreferenceKeys(project: SidebarProjectSnapshot): string
     ...project.memberProjects.map((member) => member.physicalProjectKey),
     ...project.memberProjects.map((member) => legacyProjectCwdPreferenceKey(member.workspaceRoot)),
   ];
-}
-
-function projectGroupingModeDescription(mode: SidebarProjectGroupingMode): string {
-  switch (mode) {
-    case "repository":
-      return "Projects from the same repository share one sidebar row.";
-    case "repository_path":
-      return "Projects group only when both the repository and repo-relative path match.";
-    case "separate":
-      return "Every project path gets its own sidebar row.";
-  }
 }
 
 function buildThreadJumpLabelMap(input: {
@@ -925,6 +909,7 @@ interface SidebarProjectThreadListProps {
 const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   props: SidebarProjectThreadListProps,
 ) {
+  const { t } = useTranslation();
   const {
     projectKey,
     projectExpanded,
@@ -975,7 +960,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
             data-thread-selection-safe
             className="flex h-8 w-full translate-x-0 items-center px-2 text-left text-xs text-sidebar-muted-foreground/75"
           >
-            <span>No threads yet</span>
+            <span>{t("sidebar.noThreads")}</span>
           </div>
         </SidebarMenuSubItem>
       ) : null}
@@ -1026,7 +1011,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
           >
             <span className="flex min-w-0 flex-1 items-center gap-2">
               {hiddenThreadStatus && <ThreadStatusLabel status={hiddenThreadStatus} compact />}
-              <span>Show more</span>
+              <span>{t("sidebar.showMoreGeneric")}</span>
             </span>
           </SidebarMenuSubButton>
         </SidebarMenuSubItem>
@@ -1042,7 +1027,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
               collapseThreadListForProject(projectKey);
             }}
           >
-            <span>Show less</span>
+            <span>{t("sidebar.showLess")}</span>
           </SidebarMenuSubButton>
         </SidebarMenuSubItem>
       )}
@@ -1071,6 +1056,26 @@ interface SidebarProjectItemProps {
 
 const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjectItemProps) {
   const { t } = useTranslation();
+  const projectGroupingModeLabel = (mode: SidebarProjectGroupingMode) => {
+    switch (mode) {
+      case "repository":
+        return t("sidebar.projectGroupingRepository");
+      case "repository_path":
+        return t("sidebar.projectGroupingRepositoryPath");
+      case "separate":
+        return t("sidebar.projectGroupingSeparate");
+    }
+  };
+  const projectGroupingModeDescription = (mode: SidebarProjectGroupingMode) => {
+    switch (mode) {
+      case "repository":
+        return t("sidebar.projectGroupingRepositoryDescription");
+      case "repository_path":
+        return t("sidebar.projectGroupingRepositoryPathDescription");
+      case "separate":
+        return t("sidebar.projectGroupingSeparateDescription");
+    }
+  };
   const {
     project,
     isThreadListExpanded,
@@ -1460,11 +1465,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         const warningToastId = toastManager.add(
           stackedThreadToast({
             type: "warning",
-            title: "Project is not empty",
-            description: "Delete all threads in this project before removing it.",
+            title: t("sidebar.projectNotEmpty"),
+            description: t("sidebar.projectNotEmptyDescription"),
             actionVariant: "destructive",
             actionProps: {
-              children: "Delete anyway",
+              children: t("sidebar.deleteAnyway"),
               onClick: () => {
                 void (async () => {
                   toastManager.close(warningToastId);
@@ -1482,24 +1487,33 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                   const confirmed = await api.dialogs.confirm(
                     latestProjectThreads.length > 0
                       ? [
-                          `Remove project "${member.title}" and delete its ${latestProjectThreads.length} thread${
-                            latestProjectThreads.length === 1 ? "" : "s"
-                          }?`,
-                          `Path: ${member.workspaceRoot}`,
+                          t("sidebar.removeProjectWithThreads", {
+                            project: member.title,
+                            count: latestProjectThreads.length,
+                          }),
+                          t("sidebar.pathLabel", { path: member.workspaceRoot }),
                           ...(member.environmentLabel
-                            ? [`Environment: ${member.environmentLabel}`]
+                            ? [
+                                t("sidebar.environmentLabel", {
+                                  environment: member.environmentLabel,
+                                }),
+                              ]
                             : []),
-                          "This permanently clears conversation history for those threads.",
-                          "This removes only this project entry.",
-                          "This action cannot be undone.",
+                          t("sidebar.deleteThreadsConfirmation"),
+                          t("sidebar.removesProjectEntry"),
+                          t("sidebar.actionCannotBeUndone"),
                         ].join("\n")
                       : [
-                          `Remove project "${member.title}"?`,
-                          `Path: ${member.workspaceRoot}`,
+                          t("sidebar.removeProjectConfirmation", { project: member.title }),
+                          t("sidebar.pathLabel", { path: member.workspaceRoot }),
                           ...(member.environmentLabel
-                            ? [`Environment: ${member.environmentLabel}`]
+                            ? [
+                                t("sidebar.environmentLabel", {
+                                  environment: member.environmentLabel,
+                                }),
+                              ]
                             : []),
-                          "This removes only this project entry.",
+                          t("sidebar.removesProjectEntry"),
                         ].join("\n"),
                   );
                   if (!confirmed) {
@@ -1512,17 +1526,19 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                     toastManager.add(
                       stackedThreadToast({
                         type: "error",
-                        title: `Failed to remove "${member.title}"`,
+                        title: t("sidebar.failedToRemoveProject", { project: member.title }),
                         description:
                           error instanceof Error
                             ? error.message
-                            : "Unknown error removing project.",
+                            : t("sidebar.unknownProjectRemovalError"),
                       }),
                     );
                   }
                 })().catch((error) => {
                   const message =
-                    error instanceof Error ? error.message : "Unknown error removing project.";
+                    error instanceof Error
+                      ? error.message
+                      : t("sidebar.unknownProjectRemovalError");
                   console.error("Failed to remove project", {
                     projectId: member.id,
                     environmentId: member.environmentId,
@@ -1531,7 +1547,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                   toastManager.add(
                     stackedThreadToast({
                       type: "error",
-                      title: `Failed to remove "${member.title}"`,
+                      title: t("sidebar.failedToRemoveProject", { project: member.title }),
                       description: message,
                     }),
                   );
@@ -1544,10 +1560,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       }
 
       const message = [
-        `Remove project "${member.title}"?`,
-        `Path: ${member.workspaceRoot}`,
-        ...(member.environmentLabel ? [`Environment: ${member.environmentLabel}`] : []),
-        "This removes only this project entry.",
+        t("sidebar.removeProjectConfirmation", { project: member.title }),
+        t("sidebar.pathLabel", { path: member.workspaceRoot }),
+        ...(member.environmentLabel
+          ? [t("sidebar.environmentLabel", { environment: member.environmentLabel })]
+          : []),
+        t("sidebar.removesProjectEntry"),
       ].join("\n");
       const confirmed = await api.dialogs.confirm(message);
       if (!confirmed) {
@@ -1557,7 +1575,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const result = await removeProject(member);
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
-        const message = error instanceof Error ? error.message : "Unknown error removing project.";
+        const message =
+          error instanceof Error ? error.message : t("sidebar.unknownProjectRemovalError");
         console.error("Failed to remove project", {
           projectId: member.id,
           environmentId: member.environmentId,
@@ -1566,13 +1585,13 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: `Failed to remove "${member.title}"`,
+            title: t("sidebar.failedToRemoveProject", { project: member.title }),
             description: message,
           }),
         );
       }
     },
-    [memberThreadCountByPhysicalKey, removeProject],
+    [memberThreadCountByPhysicalKey, removeProject, t],
   );
 
   const handleProjectButtonContextMenu = useCallback(
@@ -1652,10 +1671,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
         const clicked = await api.contextMenu.show(
           [
-            buildTargetedItem("rename", "Rename"),
-            buildTargetedItem("grouping", "Group into..."),
-            buildTargetedItem("copy-path", "Copy Path"),
-            buildTargetedItem("delete", "Remove", {
+            buildTargetedItem("rename", t("common.rename")),
+            buildTargetedItem("grouping", t("sidebar.groupInto")),
+            buildTargetedItem("copy-path", t("sidebar.copyPath")),
+            buildTargetedItem("delete", t("common.remove"), {
               destructive: true,
             }),
           ],
@@ -1680,6 +1699,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       project.groupedProjectCount,
       project.memberProjects,
       suppressProjectClickForContextMenuRef,
+      t,
     ],
   );
 
@@ -1786,7 +1806,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       if (clicked === "archive") {
         if (appSettingsConfirmThreadArchive) {
           const confirmed = await api.dialogs.confirm(
-            `Archive ${count} thread${count === 1 ? "" : "s"}?`,
+            t("sidebar.archiveThreadsConfirmation", { count }),
           );
           if (!confirmed) return;
         }
@@ -1801,8 +1821,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Thread archived, but navigation failed",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              title: t("sidebar.archivedNavigationFailed"),
+              description: error instanceof Error ? error.message : t("sidebar.errorOccurred"),
             }),
           );
         }
@@ -1813,8 +1833,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             toastManager.add(
               stackedThreadToast({
                 type: "error",
-                title: "Failed to archive threads",
-                description: error instanceof Error ? error.message : "An error occurred.",
+                title: t("sidebar.failedToArchiveThreads"),
+                description: error instanceof Error ? error.message : t("sidebar.errorOccurred"),
               }),
             );
           }
@@ -1828,10 +1848,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
       if (appSettingsConfirmThreadDelete) {
         const confirmed = await api.dialogs.confirm(
-          [
-            `Delete ${count} thread${count === 1 ? "" : "s"}?`,
-            "This permanently clears conversation history for these threads.",
-          ].join("\n"),
+          [t("sidebar.deleteThreadsTitle", { count }), t("sidebar.deleteThreadsConfirmation")].join(
+            "\n",
+          ),
         );
         if (!confirmed) return;
       }
@@ -1847,8 +1866,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             toastManager.add(
               stackedThreadToast({
                 type: "error",
-                title: "Failed to delete threads",
-                description: error instanceof Error ? error.message : "An error occurred.",
+                title: t("sidebar.failedToDeleteThreads"),
+                description: error instanceof Error ? error.message : t("sidebar.errorOccurred"),
               }),
             );
           }
@@ -1865,6 +1884,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       deleteThread,
       markThreadUnread,
       removeFromSelection,
+      t,
     ],
   );
 
@@ -1884,14 +1904,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Could not create thread",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              title: t("sidebar.couldNotCreateThread"),
+              description: error instanceof Error ? error.message : t("sidebar.errorOccurred"),
             }),
           );
         }
       })();
     },
-    [handleNewThread, isMobile, setOpenMobile],
+    [handleNewThread, isMobile, setOpenMobile, t],
   );
 
   const handleCreateThreadClick = useCallback(
@@ -1926,8 +1946,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Could not choose environment",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              title: t("sidebar.couldNotChooseEnvironment"),
+              description: error instanceof Error ? error.message : t("sidebar.errorOccurred"),
             }),
           );
           return;
@@ -1945,7 +1965,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         createThreadForProjectMember(targetMember);
       })();
     },
-    [createThreadForProjectMember, project.groupedProjectCount, project.memberProjects],
+    [createThreadForProjectMember, project.groupedProjectCount, project.memberProjects, t],
   );
 
   const attemptArchiveThread = useCallback(
@@ -1991,7 +2011,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       if (trimmed.length === 0) {
         toastManager.add({
           type: "warning",
-          title: "Thread title cannot be empty",
+          title: t("sidebar.threadTitleRequired"),
         });
         finishRename();
         return;
@@ -2012,14 +2032,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Failed to rename thread",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            title: t("sidebar.renameThreadFailed"),
+            description: error instanceof Error ? error.message : t("sidebar.errorOccurred"),
           }),
         );
       }
       finishRename();
     },
-    [updateThreadMetadata],
+    [t, updateThreadMetadata],
   );
 
   const closeProjectRenameDialog = useCallback(() => {
@@ -2036,7 +2056,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     if (trimmed.length === 0) {
       toastManager.add({
         type: "warning",
-        title: "Project title cannot be empty",
+        title: t("sidebar.projectTitleRequired"),
       });
       return;
     }
@@ -2060,12 +2080,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Failed to rename project",
-          description: error instanceof Error ? error.message : "An error occurred.",
+          title: t("sidebar.failedToRenameProject"),
+          description: error instanceof Error ? error.message : t("sidebar.errorOccurred"),
         }),
       );
     }
-  }, [closeProjectRenameDialog, projectRenameTarget, projectRenameTitle, updateProject]);
+  }, [closeProjectRenameDialog, projectRenameTarget, projectRenameTitle, t, updateProject]);
 
   const closeProjectGroupingDialog = useCallback(() => {
     setProjectGroupingTarget(null);
@@ -2113,13 +2133,18 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const clicked = await api.contextMenu.show(
         [
           ...(thread.branch
-            ? [{ id: "new-thread-on-branch", label: `New thread on ${thread.branch}` }]
+            ? [
+                {
+                  id: "new-thread-on-branch",
+                  label: t("sidebar.newThreadOnBranch", { branch: thread.branch }),
+                },
+              ]
             : []),
-          { id: "rename", label: "Rename thread" },
-          { id: "mark-unread", label: "Mark unread" },
-          { id: "copy-path", label: "Copy Path" },
-          { id: "copy-thread-id", label: "Copy Thread ID" },
-          { id: "delete", label: "Delete", destructive: true, icon: "trash" },
+          { id: "rename", label: t("sidebar.renameThread") },
+          { id: "mark-unread", label: t("sidebar.markUnread") },
+          { id: "copy-path", label: t("sidebar.copyPath") },
+          { id: "copy-thread-id", label: t("sidebar.copyThreadId") },
+          { id: "delete", label: t("common.delete"), destructive: true, icon: "trash" },
         ],
         position,
       );
@@ -2140,8 +2165,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Could not create thread",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              title: t("sidebar.couldNotCreateThread"),
+              description: error instanceof Error ? error.message : t("sidebar.errorOccurred"),
             }),
           );
         }
@@ -2162,8 +2187,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Path unavailable",
-              description: "This thread does not have a workspace path to copy.",
+              title: t("sidebar.pathUnavailable"),
+              description: t("sidebar.pathUnavailableDescription"),
             }),
           );
           return;
@@ -2179,8 +2204,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       if (appSettingsConfirmThreadDelete) {
         const confirmed = await api.dialogs.confirm(
           [
-            `Delete thread "${thread.title}"?`,
-            "This permanently clears conversation history for this thread.",
+            `${t("sidebar.deleteThread")}: ${thread.title}?`,
+            t("sidebar.deleteThreadConfirmation"),
           ].join("\n"),
         );
         if (!confirmed) {
@@ -2193,8 +2218,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Failed to delete thread",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            title: t("sidebar.failedToDeleteThread"),
+            description: error instanceof Error ? error.message : t("sidebar.errorOccurred"),
           }),
         );
       }
@@ -2209,6 +2234,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       memberProjectByScopedKey,
       project.workspaceRoot,
       startThreadRename,
+      t,
     ],
   );
 
@@ -2267,8 +2293,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 <span
                   aria-label={
                     project.allRemoteMembersAreDesktopLocal
-                      ? "Local sandbox project"
-                      : "Remote project"
+                      ? t("sidebar.localSandboxProject")
+                      : t("sidebar.remoteProject")
                   }
                   className="pointer-events-none absolute top-1 right-1.5 inline-flex size-5 items-center justify-center rounded-md text-icon-muted transition-opacity duration-150 max-sm:right-7 group-hover/project-header:opacity-0 group-focus-within/project-header:opacity-0 max-sm:group-hover/project-header:opacity-100 max-sm:group-focus-within/project-header:opacity-100"
                 />
@@ -2282,8 +2308,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             </TooltipTrigger>
             <TooltipPopup side="top">
               {project.allRemoteMembersAreDesktopLocal
-                ? `Local sandbox: ${project.remoteEnvironmentLabels.join(", ")}`
-                : `Remote environment: ${project.remoteEnvironmentLabels.join(", ")}`}
+                ? t("sidebar.localSandbox", {
+                    environments: project.remoteEnvironmentLabels.join(", "),
+                  })
+                : t("sidebar.remoteEnvironment", {
+                    environments: project.remoteEnvironmentLabels.join(", "),
+                  })}
             </TooltipPopup>
           </Tooltip>
         )}
@@ -2293,7 +2323,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               <div className="pointer-events-none absolute top-[calc(50%+1px)] right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
                 <button
                   type="button"
-                  aria-label={`Create new thread in ${project.displayName}`}
+                  aria-label={t("sidebar.createNewThreadIn", { project: project.displayName })}
                   data-testid="new-thread-button"
                   className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
                   onClick={handleCreateThreadClick}
@@ -2304,7 +2334,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             }
           />
           <TooltipPopup side="top">
-            {newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"}
+            {newThreadShortcutLabel
+              ? t("sidebar.newThreadWithShortcut", { shortcut: newThreadShortcutLabel })
+              : t("sidebar.newThread")}
           </TooltipPopup>
         </Tooltip>
       </div>
@@ -2356,18 +2388,22 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       >
         <DialogPopup className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Rename project</DialogTitle>
+            <DialogTitle>{t("sidebar.renameProject")}</DialogTitle>
             <DialogDescription>
               {projectRenameTarget
-                ? `Update the title for ${projectRenameTarget.workspaceRoot}.`
-                : "Update the project title."}
+                ? t("sidebar.renameProjectDescription", {
+                    path: projectRenameTarget.workspaceRoot,
+                  })
+                : t("sidebar.renameProjectDescriptionGeneric")}
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="space-y-4">
             <div className="grid gap-1.5">
-              <span className="text-xs font-medium text-foreground">Project title</span>
+              <span className="text-xs font-medium text-foreground">
+                {t("sidebar.projectTitle")}
+              </span>
               <Input
-                aria-label="Project title"
+                aria-label={t("sidebar.projectTitle")}
                 value={projectRenameTitle}
                 onChange={(event) => setProjectRenameTitle(event.target.value)}
                 onKeyDown={(event) => {
@@ -2380,15 +2416,17 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             </div>
             {projectRenameTarget?.environmentLabel ? (
               <p className="text-xs text-muted-foreground">
-                Environment: {projectRenameTarget.environmentLabel}
+                {t("sidebar.environmentLabel", {
+                  environment: projectRenameTarget.environmentLabel,
+                })}
               </p>
             ) : null}
           </DialogPanel>
           <DialogFooter>
             <Button variant="outline" onClick={closeProjectRenameDialog}>
-              Cancel
+              {t("common.cancel")}
             </Button>
-            <Button onClick={() => void submitProjectRename()}>Save</Button>
+            <Button onClick={() => void submitProjectRename()}>{t("common.save")}</Button>
           </DialogFooter>
         </DialogPopup>
       </Dialog>
@@ -2403,16 +2441,20 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       >
         <DialogPopup className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Project grouping</DialogTitle>
+            <DialogTitle>{t("sidebar.projectGroupingTitle")}</DialogTitle>
             <DialogDescription>
               {projectGroupingTarget
-                ? `Choose how ${projectGroupingTarget.workspaceRoot} should be grouped in the sidebar.`
-                : "Choose how this project should be grouped in the sidebar."}
+                ? t("sidebar.projectGroupingDescription", {
+                    path: projectGroupingTarget.workspaceRoot,
+                  })
+                : t("sidebar.projectGroupingDescriptionGeneric")}
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="space-y-4">
             <div className="grid gap-1.5">
-              <span className="text-xs font-medium text-foreground">Grouping rule</span>
+              <span className="text-xs font-medium text-foreground">
+                {t("sidebar.projectGroupingRule")}
+              </span>
               <Select
                 value={projectGroupingSelection}
                 onValueChange={(value) => {
@@ -2426,25 +2468,29 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                   }
                 }}
               >
-                <SelectTrigger className="w-full" aria-label="Project grouping rule">
+                <SelectTrigger className="w-full" aria-label={t("sidebar.projectGroupingRuleAria")}>
                   <SelectValue>
                     {projectGroupingSelection === "inherit"
-                      ? `Use global default (${PROJECT_GROUPING_MODE_LABELS[projectGroupingSettings.sidebarProjectGroupingMode]})`
-                      : PROJECT_GROUPING_MODE_LABELS[projectGroupingSelection]}
+                      ? t("sidebar.projectGroupingUseDefaultWithMode", {
+                          mode: projectGroupingModeLabel(
+                            projectGroupingSettings.sidebarProjectGroupingMode,
+                          ),
+                        })
+                      : projectGroupingModeLabel(projectGroupingSelection)}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
                   <SelectItem hideIndicator value="inherit">
-                    Use global default
+                    {t("sidebar.projectGroupingUseDefault")}
                   </SelectItem>
                   <SelectItem hideIndicator value="repository">
-                    {PROJECT_GROUPING_MODE_LABELS.repository}
+                    {projectGroupingModeLabel("repository")}
                   </SelectItem>
                   <SelectItem hideIndicator value="repository_path">
-                    {PROJECT_GROUPING_MODE_LABELS.repository_path}
+                    {projectGroupingModeLabel("repository_path")}
                   </SelectItem>
                   <SelectItem hideIndicator value="separate">
-                    {PROJECT_GROUPING_MODE_LABELS.separate}
+                    {projectGroupingModeLabel("separate")}
                   </SelectItem>
                 </SelectPopup>
               </Select>
@@ -2457,9 +2503,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           </DialogPanel>
           <DialogFooter>
             <Button variant="outline" onClick={closeProjectGroupingDialog}>
-              Cancel
+              {t("common.cancel")}
             </Button>
-            <Button onClick={saveProjectGroupingPreference}>Save</Button>
+            <Button onClick={saveProjectGroupingPreference}>{t("common.save")}</Button>
           </DialogFooter>
         </DialogPopup>
       </Dialog>
@@ -2476,6 +2522,7 @@ const SidebarProjectListRow = memo(function SidebarProjectListRow(props: Sidebar
 });
 
 function LocalSecondaryStatus() {
+  const { t } = useTranslation();
   const { environments } = useEnvironments();
   // The desktop reports which local secondary backends (e.g. the WSL backend)
   // exist; the hook polls because the bridge has no change event. A backend that
@@ -2530,19 +2577,23 @@ function LocalSecondaryStatus() {
         >
           <LoaderIcon className="animate-spin" />
           <AlertTitle className="text-xs font-medium text-foreground">
-            Connecting {connecting.join(", ")}
+            {t("sidebar.connectingBackends", { backends: connecting.join(", ") })}
           </AlertTitle>
         </Alert>
       ) : null}
       {failed.length > 0 ? (
         <Alert variant="warning" className="rounded-2xl border-warning/40 bg-warning/8">
           <TriangleAlertIcon />
-          <AlertTitle>Couldn't connect {failed.map((entry) => entry.label).join(", ")}</AlertTitle>
+          <AlertTitle>
+            {t("sidebar.couldNotConnectBackends", {
+              backends: failed.map((entry) => entry.label).join(", "),
+            })}
+          </AlertTitle>
           <AlertDescription>
             {failed
               .map((entry) => entry.error)
               .filter(Boolean)
-              .join("; ") || "The backend didn't respond."}
+              .join("; ") || t("sidebar.backendDidNotRespond")}
           </AlertDescription>
         </Alert>
       ) : null}
@@ -2753,6 +2804,7 @@ interface SidebarProjectsContentProps {
 const SidebarProjectsContent = memo(function SidebarProjectsContent(
   props: SidebarProjectsContentProps,
 ) {
+  const { t } = useTranslation();
   const {
     showArm64IntelBuildWarning,
     arm64IntelBuildWarningDescription,
@@ -2827,7 +2879,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                 }
               >
                 <SearchIcon />
-                <span className="flex-1 truncate">Search</span>
+                <span className="flex-1 truncate">{t("common.search")}</span>
                 {commandPaletteShortcutLabel ? (
                   <Kbd className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">
                     {commandPaletteShortcutLabel}
@@ -2865,7 +2917,9 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
       <LocalSecondaryStatus />
       <SidebarGroup className="px-2 py-2">
         <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
-          <span className="text-xs font-medium text-sidebar-muted-foreground/80">Projects</span>
+          <span className="text-xs font-medium text-sidebar-muted-foreground/80">
+            {t("sidebar.projects")}
+          </span>
           <div className="flex items-center gap-1">
             <ProjectSortMenu
               projectSortOrder={projectSortOrder}
@@ -2880,7 +2934,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                 render={
                   <button
                     type="button"
-                    aria-label="Add project"
+                    aria-label={t("sidebar.addProject")}
                     data-testid="sidebar-add-project-trigger"
                     className="inline-flex h-6 min-w-6 cursor-pointer items-center justify-center rounded-md px-[calc(--spacing(1)-1px)] text-icon-muted transition-colors hover:bg-accent hover:text-foreground"
                     onClick={openAddProject}
@@ -2889,7 +2943,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
               >
                 <FolderPlusIcon className="size-3.5" />
               </TooltipTrigger>
-              <TooltipPopup side="right">Add project</TooltipPopup>
+              <TooltipPopup side="right">{t("sidebar.addProject")}</TooltipPopup>
             </Tooltip>
           </div>
         </div>
@@ -2968,7 +3022,9 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
         )}
 
         {projectsLength === 0 && (
-          <div className="px-2 pt-4 text-center text-secondary-label text-xs">No projects yet</div>
+          <div className="px-2 pt-4 text-center text-secondary-label text-xs">
+            {t("sidebar.noProjects")}
+          </div>
         )}
       </SidebarGroup>
     </SidebarContent>
@@ -2976,6 +3032,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
 });
 
 export default function LegacySidebar() {
+  const { t } = useTranslation();
   const projects = useProjects();
   const sidebarThreads = useThreadShells();
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
@@ -3504,7 +3561,7 @@ export default function LegacySidebar() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Could not download update",
+              title: t("desktopUpdate.couldNotDownload"),
               description: actionError,
             }),
           );
@@ -3513,8 +3570,9 @@ export default function LegacySidebar() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Could not start update download",
-              description: error instanceof Error ? error.message : "An unexpected error occurred.",
+              title: t("desktopUpdate.couldNotStartDownload"),
+              description:
+                error instanceof Error ? error.message : t("desktopUpdate.unexpectedError"),
             }),
           );
         });
@@ -3535,7 +3593,7 @@ export default function LegacySidebar() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Could not install update",
+              title: t("desktopUpdate.couldNotInstall"),
               description: actionError,
             }),
           );
@@ -3544,13 +3602,14 @@ export default function LegacySidebar() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Could not install update",
-              description: error instanceof Error ? error.message : "An unexpected error occurred.",
+              title: t("desktopUpdate.couldNotInstall"),
+              description:
+                error instanceof Error ? error.message : t("desktopUpdate.unexpectedError"),
             }),
           );
         });
     }
-  }, [desktopUpdateButtonAction, desktopUpdateButtonDisabled, desktopUpdateState]);
+  }, [desktopUpdateButtonAction, desktopUpdateButtonDisabled, desktopUpdateState, t]);
 
   const expandThreadListForProject = useCallback((projectKey: string) => {
     setExpandedThreadListsByProject((current) => {

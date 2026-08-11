@@ -92,6 +92,7 @@ export function useThreadComposerState() {
   const composerDrafts = useAtomValue(composerDraftsAtom);
   const queuedMessagesByThreadKey = useThreadOutboxMessages();
   const setThreadGoal = useAtomCommand(threadEnvironment.setGoal, { reportFailure: false });
+  const getThreadGoal = useAtomCommand(threadEnvironment.getGoal, { reportFailure: false });
   const pauseThreadGoal = useAtomCommand(threadEnvironment.pauseGoal, { reportFailure: false });
   const resumeThreadGoal = useAtomCommand(threadEnvironment.resumeGoal, { reportFailure: false });
   const clearThreadGoal = useAtomCommand(threadEnvironment.clearGoal, { reportFailure: false });
@@ -169,11 +170,6 @@ export function useThreadComposerState() {
     }
 
     if (submission.kind === "goal") {
-      if (submission.command.action === "missing-objective") {
-        setPendingConnectionError("Type an objective after /goal, or use pause, resume, or clear.");
-        return null;
-      }
-
       const modelSelection = draft.modelSelection ?? thread.modelSelection;
       const providerDriver = serverConfig?.providers.find(
         (provider) => provider.instanceId === modelSelection.instanceId,
@@ -193,6 +189,7 @@ export function useThreadComposerState() {
           threadId: selectedThreadShell.id,
         },
         operations: {
+          getGoal: getThreadGoal,
           setGoal: setThreadGoal,
           pauseGoal: pauseThreadGoal,
           resumeGoal: resumeThreadGoal,
@@ -247,6 +244,7 @@ export function useThreadComposerState() {
     return messageId;
   }, [
     clearThreadGoal,
+    getThreadGoal,
     pauseThreadGoal,
     resumeThreadGoal,
     selectedThreadDetail,

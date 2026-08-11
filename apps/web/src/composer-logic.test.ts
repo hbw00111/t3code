@@ -7,6 +7,8 @@ import {
   expandCollapsedComposerCursor,
   isCollapsedCursorAdjacentToInlineToken,
   parseComposerGoalCommand,
+  goalCommandExitsPlanMode,
+  goalCommandIsReadOnly,
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
   shouldSubmitComposerOnEnter,
@@ -386,11 +388,31 @@ describe("parseComposerGoalCommand", () => {
     expect(parseComposerGoalCommand(`/goal ${action}`)).toEqual({ action });
   });
 
-  it("reports a missing objective", () => {
-    expect(parseComposerGoalCommand(" /goal ")).toEqual({ action: "missing-objective" });
+  it("treats a bare command as a status query", () => {
+    expect(parseComposerGoalCommand(" /goal ")).toEqual({ action: "get" });
   });
 
   it("ignores ordinary messages", () => {
     expect(parseComposerGoalCommand("please set a goal")).toBeNull();
+  });
+});
+
+describe("goalCommandExitsPlanMode", () => {
+  it("only exits plan mode when setting a new objective", () => {
+    expect(goalCommandExitsPlanMode({ action: "set", objective: "Ship it" })).toBe(true);
+    expect(goalCommandExitsPlanMode({ action: "get" })).toBe(false);
+    expect(goalCommandExitsPlanMode({ action: "pause" })).toBe(false);
+    expect(goalCommandExitsPlanMode({ action: "resume" })).toBe(false);
+    expect(goalCommandExitsPlanMode({ action: "clear" })).toBe(false);
+  });
+});
+
+describe("goalCommandIsReadOnly", () => {
+  it("only marks a status query as read-only", () => {
+    expect(goalCommandIsReadOnly({ action: "get" })).toBe(true);
+    expect(goalCommandIsReadOnly({ action: "set", objective: "Ship it" })).toBe(false);
+    expect(goalCommandIsReadOnly({ action: "pause" })).toBe(false);
+    expect(goalCommandIsReadOnly({ action: "resume" })).toBe(false);
+    expect(goalCommandIsReadOnly({ action: "clear" })).toBe(false);
   });
 });

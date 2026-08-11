@@ -37,6 +37,7 @@ import { primaryServerSettingsAtom, serverEnvironment } from "~/state/server";
 import { usePrimaryEnvironment } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useTheme } from "./useTheme";
+import { subscribeBrowserClientSettings } from "~/clientPersistenceStorage";
 
 const CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE = "[CLIENT_SETTINGS]";
 
@@ -50,6 +51,7 @@ let clientSettingsHydrated = false;
 let clientSettingsHydrationPromise: Promise<void> | null = null;
 let clientSettingsPersistenceQueue: Promise<void> = Promise.resolve();
 let clientSettingsHydrationGeneration = 0;
+let unsubscribeBrowserClientSettings: (() => void) | null = null;
 
 function emitClientSettingsChange() {
   for (const listener of clientSettingsListeners) {
@@ -72,6 +74,20 @@ function replaceClientSettingsSnapshot(settings: ClientSettings): void {
   emitClientSettingsChange();
 }
 
+function ensureBrowserClientSettingsSubscription(): void {
+  if (unsubscribeBrowserClientSettings !== null) {
+    return;
+  }
+  unsubscribeBrowserClientSettings = subscribeBrowserClientSettings((persistedSettings) => {
+    clientSettingsHydrationGeneration += 1;
+    clientSettingsHydrationPromise = null;
+    const settings = { ...DEFAULT_CLIENT_SETTINGS, ...(persistedSettings ?? {}) };
+    lastPersistedClientSettingsSnapshot = settings;
+    replaceClientSettingsSnapshot(settings);
+    setClientSettingsHydrated(true);
+  });
+}
+
 function setClientSettingsHydrated(nextHydrated: boolean): void {
   if (clientSettingsHydrated === nextHydrated) {
     return;
@@ -81,6 +97,7 @@ function setClientSettingsHydrated(nextHydrated: boolean): void {
 }
 
 function subscribeClientSettings(listener: () => void): () => void {
+  ensureBrowserClientSettingsSubscription();
   clientSettingsListeners.add(listener);
   void hydrateClientSettings();
   return () => {
@@ -93,6 +110,7 @@ function getClientSettingsHydratedSnapshot(): boolean {
 }
 
 function subscribeClientSettingsHydration(listener: () => void): () => void {
+  ensureBrowserClientSettingsSubscription();
   clientSettingsHydrationListeners.add(listener);
   void hydrateClientSettings();
   return () => {
@@ -101,6 +119,7 @@ function subscribeClientSettingsHydration(listener: () => void): () => void {
 }
 
 async function hydrateClientSettings(): Promise<void> {
+  ensureBrowserClientSettingsSubscription();
   if (clientSettingsHydrated) {
     return;
   }
@@ -365,6 +384,8 @@ export function useUpdateClientSettings() {
 }
 
 export function __resetClientSettingsPersistenceForTests(): void {
+  unsubscribeBrowserClientSettings?.();
+  unsubscribeBrowserClientSettings = null;
   clientSettingsHydrationGeneration += 1;
   clientSettingsSnapshot = DEFAULT_CLIENT_SETTINGS;
   lastPersistedClientSettingsSnapshot = DEFAULT_CLIENT_SETTINGS;

@@ -7,6 +7,8 @@ composer, choose the command, then add the objective:
 /goal Finish the requested feature, verify it, and keep fixing issues until the checks pass.
 ```
 
+Type `/goal` by itself to see the current objective, status, token usage, and elapsed time.
+
 Use these commands in the same thread to control the goal:
 
 ```text
@@ -16,4 +18,5 @@ Use these commands in the same thread to control the goal:
 ```
 
 Goals are available for Codex providers. The activity timeline records each goal change, including
-failed updates. A new thread can start with a goal in the current checkout or a new worktree.
+status checks and failed updates. A new thread can start with a goal in the current checkout or a
+new worktree.

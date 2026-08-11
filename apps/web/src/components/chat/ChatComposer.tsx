@@ -1750,15 +1750,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           );
           if (applied) {
             setComposerHighlightedItemId(null);
-            if (interactionMode === "plan") {
-              void handleInteractionModeChange("default");
-            }
           }
           return;
         }
-        void handleInteractionModeChange(
-          item.command === "plan" && interactionMode !== "plan" ? "plan" : "default",
-        );
+        void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
         });
@@ -1804,12 +1799,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return;
       }
     },
-    [
-      applyPromptReplacement,
-      handleInteractionModeChange,
-      interactionMode,
-      resolveActiveComposerTrigger,
-    ],
+    [applyPromptReplacement, handleInteractionModeChange, resolveActiveComposerTrigger],
   );
 
   const onComposerMenuItemHighlighted = useCallback(

@@ -46,9 +46,13 @@ import { armAgentAwarenessLiveActivityForLocalWork } from "../agent-awareness/re
 import { enqueueThreadOutboxMessage, removeThreadOutboxMessage } from "../../state/thread-outbox";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
 import { branchBadgeLabel, useNewTaskFlow } from "./new-task-flow-provider";
-import { useCreateProjectThread } from "./use-project-actions";
+import { useCreateProjectGoal, useCreateProjectThread } from "./use-project-actions";
 import { resolveDraftProjectSelection } from "./new-task-project-selection";
 import { useIncomingShare } from "../sharing/IncomingShareProvider";
+import {
+  parseComposerGoalCommand,
+  providerSupportsThreadGoals,
+} from "../../lib/threadGoalCommands";
 
 function formatWorkspaceLabel(input: {
   readonly workspaceMode: string;
@@ -74,6 +78,7 @@ export function NewTaskDraftScreen(props: {
 }) {
   const projects = useProjects();
   const createProjectThread = useCreateProjectThread();
+  const createProjectGoal = useCreateProjectGoal();
   const flow = useNewTaskFlow();
   const navigation = useNavigation();
   const {
@@ -731,6 +736,9 @@ export function NewTaskDraftScreen(props: {
     const runtimeMode = draft.runtimeMode ?? flow.runtimeMode;
     const interactionMode = draft.interactionMode ?? flow.interactionMode;
     const initialMessageText = draft.text.trim();
+    const goalCommand =
+      draft.attachments.length === 0 ? parseComposerGoalCommand(initialMessageText) : null;
+    const goalObjective = goalCommand?.action === "set" ? goalCommand.objective : null;
 
     if (
       !modelSelection ||
@@ -741,9 +749,33 @@ export function NewTaskDraftScreen(props: {
       return;
     }
 
+    if (goalCommand !== null && goalObjective === null) {
+      Alert.alert(
+        "Start a task first",
+        "Only /goal followed by an objective can start a new task.",
+      );
+      return;
+    }
+    if (goalObjective !== null) {
+      const providerDriver = selectedEnvironmentServerConfig?.providers.find(
+        (provider) => provider.instanceId === modelSelection.instanceId,
+      )?.driver;
+      if (!providerSupportsThreadGoals(providerDriver)) {
+        Alert.alert("Goals require Codex", "Switch to a Codex model before using /goal.");
+        return;
+      }
+    }
+
     const editingPendingTask = flow.editingPendingTask;
 
     if (!environmentConnected) {
+      if (goalObjective !== null) {
+        Alert.alert(
+          "Connect to start this goal",
+          "The draft is still here. Reconnect, then start it again.",
+        );
+        return;
+      }
       // Offline: park the task in the outbox; the drain sends it when the
       // environment reconnects. Editing an existing pending task re-queues it
       // under its original identifiers.
@@ -789,31 +821,43 @@ export function NewTaskDraftScreen(props: {
     // -only Activity start. If creation fails, the token registration's replay
     // finds no work and ends the card within seconds.
     armAgentAwarenessLiveActivityForLocalWork({
-      threadTitle: deriveThreadTitleFromPrompt(initialMessageText),
+      threadTitle: deriveThreadTitleFromPrompt(goalObjective ?? initialMessageText),
       projectTitle: selectedProject.title,
     });
-    const result = await createProjectThread({
-      project: selectedProject,
-      modelSelection,
-      envMode: workspaceMode,
-      branch: selectedBranchName,
-      worktreePath: workspaceMode === "worktree" ? null : selectedWorktreePath,
-      startFromOrigin,
-      runtimeMode,
-      interactionMode,
-      initialMessageText,
-      initialAttachments: draft.attachments,
-      ...(editingPendingTask
-        ? {
-            turnMetadata: {
-              threadId: editingPendingTask.threadId,
-              commandId: editingPendingTask.commandId,
-              messageId: editingPendingTask.messageId,
-              createdAt: editingPendingTask.createdAt,
-            },
-          }
-        : {}),
-    });
+    const result =
+      goalObjective !== null
+        ? await createProjectGoal({
+            project: selectedProject,
+            modelSelection,
+            envMode: workspaceMode,
+            branch: selectedBranchName,
+            worktreePath: workspaceMode === "worktree" ? null : selectedWorktreePath,
+            startFromOrigin,
+            runtimeMode,
+            objective: goalObjective,
+          })
+        : await createProjectThread({
+            project: selectedProject,
+            modelSelection,
+            envMode: workspaceMode,
+            branch: selectedBranchName,
+            worktreePath: workspaceMode === "worktree" ? null : selectedWorktreePath,
+            startFromOrigin,
+            runtimeMode,
+            interactionMode,
+            initialMessageText,
+            initialAttachments: draft.attachments,
+            ...(editingPendingTask
+              ? {
+                  turnMetadata: {
+                    threadId: editingPendingTask.threadId,
+                    commandId: editingPendingTask.commandId,
+                    messageId: editingPendingTask.messageId,
+                    createdAt: editingPendingTask.createdAt,
+                  },
+                }
+              : {}),
+          });
     flow.setSubmitting(false);
 
     if (result._tag === "Failure") {

@@ -108,6 +108,13 @@ The safety/access mode for a thread or session. [The contracts][1] define four v
 
 The agent interaction style for a thread. In [the contracts][1], the values are `default` and `plan`.
 
+#### Thread goal
+
+A provider-native objective that keeps a thread working across turns. Goal commands set, read,
+pause, resume, or clear that objective. The current goal snapshot includes its status and usage
+counters; support is advertised by each provider adapter. See [the contracts][1] and
+[CodexAdapter.ts][17].
+
 #### Assistant delivery mode
 
 Controls how assistant text reaches the thread timeline. In [the contracts][1], `streaming` updates incrementally and `buffered` accumulates text. Buffered delivery is not held until the turn completes: it spills once accumulated text would exceed 24,000 characters, and flushes at approval and user-input boundaries. See [ProviderRuntimeIngestion.ts][5].

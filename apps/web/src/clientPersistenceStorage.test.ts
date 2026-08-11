@@ -23,8 +23,12 @@ function createLocalStorageStub(): Storage {
 
 function getTestWindow(): Window & typeof globalThis {
   const localStorage = createLocalStorageStub();
+  const events = new EventTarget();
   const testWindow = {
     localStorage,
+    addEventListener: events.addEventListener.bind(events),
+    removeEventListener: events.removeEventListener.bind(events),
+    dispatchEvent: events.dispatchEvent.bind(events),
   } as Window & typeof globalThis;
   vi.stubGlobal("window", testWindow);
   vi.stubGlobal("localStorage", localStorage);
@@ -51,6 +55,32 @@ describe("clientPersistenceStorage", () => {
     writeBrowserClientSettings(settings);
 
     expect(readBrowserClientSettings()).toEqual(settings);
+  });
+
+  it("notifies browser tabs when persisted client settings change", async () => {
+    const testWindow = getTestWindow();
+    const {
+      CLIENT_SETTINGS_STORAGE_KEY,
+      subscribeBrowserClientSettings,
+      writeBrowserClientSettings,
+    } = await import("./clientPersistenceStorage");
+    const settings = {
+      ...DEFAULT_CLIENT_SETTINGS,
+      uiLanguage: "zh-CN" as const,
+    };
+    const listener = vi.fn();
+    const unsubscribe = subscribeBrowserClientSettings(listener);
+
+    writeBrowserClientSettings(settings);
+    const event = new Event("storage");
+    Object.defineProperties(event, {
+      key: { value: CLIENT_SETTINGS_STORAGE_KEY },
+      storageArea: { value: testWindow.localStorage },
+    });
+    testWindow.dispatchEvent(event);
+
+    expect(listener).toHaveBeenCalledWith(settings);
+    unsubscribe();
   });
 
   it("reports structured decode failures while preserving the fallback", async () => {

@@ -8,6 +8,7 @@ import type {
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
   ProviderSession,
+  ProviderThreadGoalResult,
   ProviderTurnStartResult,
 } from "@t3tools/contracts";
 import {
@@ -136,7 +137,8 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
   );
 
   const setThreadGoal = vi.fn(
-    (_input: unknown): Effect.Effect<void, ProviderAdapterError> => Effect.void,
+    (_input: unknown): Effect.Effect<ProviderThreadGoalResult, ProviderAdapterError> =>
+      Effect.succeed(null),
   );
 
   const interruptTurn = vi.fn(

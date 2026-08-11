@@ -6,6 +6,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { i18n } from "~/i18n/i18n";
 import { serverEnvironment } from "~/state/server";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { manualServerUpdateCommand } from "~/versionSkew";
@@ -26,8 +27,8 @@ export function serverUpdateStageLabel(stage: ServerUpdateStage): string {
   return UPDATE_STAGE_LABELS[stage];
 }
 
-function updateFailureMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Server update failed.";
+function updateFailureMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 /**
@@ -41,6 +42,7 @@ export function ServerUpdateProgress({
 }: {
   readonly state: Exclude<ServerUpdateState, { status: "idle" }>;
 }) {
+  const t = i18n.t.bind(i18n);
   if (state.status === "failed") {
     return (
       <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-destructive" role="alert">
@@ -57,7 +59,9 @@ export function ServerUpdateProgress({
         className="size-1.5 shrink-0 animate-status-pulse rounded-full bg-foreground"
         aria-hidden="true"
       />
-      <span>{serverUpdateStageLabel(state.stage)}</span>
+      <span>
+        {t(state.stage === "resuming" ? "chat.serverUpdateRestart" : "chat.serverUpdateDownload")}
+      </span>
     </div>
   );
 }
@@ -72,7 +76,7 @@ export function ServerUpdateAction({
   serverLabel,
   selfUpdate,
   targetVersion,
-  label = "Update",
+  label,
 }: {
   readonly environmentId: EnvironmentId;
   readonly serverLabel: string;
@@ -80,6 +84,7 @@ export function ServerUpdateAction({
   readonly targetVersion: string;
   readonly label?: string;
 }) {
+  const t = i18n.t.bind(i18n);
   const updateServer = useAtomCommand(serverEnvironment.updateServer, {
     reportFailure: false,
   });
@@ -88,14 +93,17 @@ export function ServerUpdateAction({
     onCopy: ({ command }) => {
       toastManager.add({
         type: "success",
-        title: "Update command copied",
-        description: `Run \`${command}\` on ${serverLabel} to update it.`,
+        title: t("chat.serverUpdateCommandCopied"),
+        description: t("chat.serverUpdateCommandCopiedDescription", {
+          command,
+          server: serverLabel,
+        }),
       });
     },
     onError: (error) => {
       toastManager.add({
         type: "error",
-        title: "Could not copy update command",
+        title: t("chat.serverUpdateCommandCopyFailed"),
         description: error.message,
       });
     },
@@ -117,15 +125,20 @@ export function ServerUpdateAction({
         }
         toastManager.add({
           type: "error",
-          title: "Server update failed",
-          description: updateFailureMessage(squashAtomCommandFailure(result)),
+          title: t("chat.serverUpdateFailed"),
+          description: updateFailureMessage(
+            squashAtomCommandFailure(result),
+            t("chat.serverUpdateFailed"),
+          ),
         });
         return;
       }
       toastManager.add({
         type: "success",
-        title: `${serverLabel} updated`,
-        description: `Reconnected on t3@${result.value.targetVersion}.`,
+        title: t("chat.serverUpdateSuccess", { server: serverLabel }),
+        description: t("chat.serverUpdateSuccessDescription", {
+          version: result.value.targetVersion,
+        }),
       });
     } finally {
       pendingUpdateEnvironmentIds.delete(environmentId);
@@ -135,7 +148,7 @@ export function ServerUpdateAction({
   if (selfUpdate === "desktop-managed") {
     return (
       <span className="text-muted-foreground text-xs">
-        Update the desktop app on that machine to update this server.
+        {t("chat.serverUpdateDesktopManagedAction")}
       </span>
     );
   }
@@ -144,14 +157,14 @@ export function ServerUpdateAction({
     const command = manualServerUpdateCommand(targetVersion);
     return (
       <Button size="xs" variant="outline" onClick={() => copyToClipboard(command, { command })}>
-        Copy update command
+        {t("chat.serverUpdateCopyCommand")}
       </Button>
     );
   }
 
   return (
     <Button size="xs" onClick={() => void handleUpdate()}>
-      {label}
+      {label ?? t("common.update")}
     </Button>
   );
 }

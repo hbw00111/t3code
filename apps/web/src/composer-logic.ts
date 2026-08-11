@@ -5,9 +5,9 @@ export type ComposerTriggerKind = "path" | "slash-command" | "skill";
 export type ComposerSlashCommand = "model" | "goal" | "plan" | "default";
 
 export type ComposerGoalCommand =
+  | { action: "get" }
   | { action: "set"; objective: string }
-  | { action: "pause" | "resume" | "clear" }
-  | { action: "missing-objective" };
+  | { action: "pause" | "resume" | "clear" };
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
@@ -284,13 +284,21 @@ export function parseComposerGoalCommand(text: string): ComposerGoalCommand | nu
   if (!match) return null;
 
   const argument = match[1]?.trim() ?? "";
-  if (!argument) return { action: "missing-objective" };
+  if (!argument) return { action: "get" };
 
   const action = argument.toLowerCase();
   if (action === "pause" || action === "resume" || action === "clear") {
     return { action };
   }
   return { action: "set", objective: argument };
+}
+
+export function goalCommandExitsPlanMode(command: ComposerGoalCommand): boolean {
+  return command.action === "set";
+}
+
+export function goalCommandIsReadOnly(command: ComposerGoalCommand): boolean {
+  return command.action === "get";
 }
 
 export function replaceTextRange(

@@ -21,6 +21,7 @@ import {
   ProviderUserInputAnswers,
   RuntimeMode,
   ThreadGoalOperation,
+  ThreadGoalSnapshot,
 } from "./orchestration.ts";
 import { ProviderInstanceId, ProviderDriverKind } from "./providerInstance.ts";
 
@@ -107,6 +108,9 @@ export const ProviderThreadGoalInput = Schema.Struct({
   ),
 );
 export type ProviderThreadGoalInput = typeof ProviderThreadGoalInput.Type;
+
+export const ProviderThreadGoalResult = Schema.NullOr(ThreadGoalSnapshot);
+export type ProviderThreadGoalResult = typeof ProviderThreadGoalResult.Type;
 
 export const ProviderRespondToRequestInput = Schema.Struct({
   threadId: ThreadId,

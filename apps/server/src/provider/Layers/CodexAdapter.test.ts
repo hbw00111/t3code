@@ -16,6 +16,7 @@ import {
   type ProviderTurnStartResult,
   type ProviderUserInputAnswers,
   ThreadId,
+  type ThreadGoalSnapshot,
   TurnId,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -58,6 +59,14 @@ const asTurnId = (value: string): TurnId => TurnId.make(value);
 const asEventId = (value: string): EventId => EventId.make(value);
 const asItemId = (value: string): ProviderItemId => ProviderItemId.make(value);
 
+const fakeGoal = (overrides: Partial<ThreadGoalSnapshot> = {}): ThreadGoalSnapshot => ({
+  objective: "Finish the migration",
+  status: "active",
+  tokensUsed: 12,
+  timeUsedSeconds: 3,
+  ...overrides,
+});
+
 class FakeCodexRuntime implements CodexSessionRuntimeShape {
   private readonly eventQueue = Effect.runSync(Queue.unbounded<ProviderEvent>());
   private readonly now = "2026-01-01T00:00:00.000Z";
@@ -83,13 +92,23 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
       }),
   );
 
-  public readonly setGoalImpl = vi.fn((_objective: string): Promise<void> => Promise.resolve());
+  public readonly getGoalImpl = vi.fn(
+    (): Promise<ThreadGoalSnapshot | null> => Promise.resolve(fakeGoal()),
+  );
 
-  public readonly pauseGoalImpl = vi.fn((): Promise<void> => Promise.resolve());
+  public readonly setGoalImpl = vi.fn(
+    (objective: string): Promise<ThreadGoalSnapshot> => Promise.resolve(fakeGoal({ objective })),
+  );
 
-  public readonly resumeGoalImpl = vi.fn((): Promise<void> => Promise.resolve());
+  public readonly pauseGoalImpl = vi.fn(
+    (): Promise<ThreadGoalSnapshot> => Promise.resolve(fakeGoal({ status: "paused" })),
+  );
 
-  public readonly clearGoalImpl = vi.fn((): Promise<void> => Promise.resolve());
+  public readonly resumeGoalImpl = vi.fn(
+    (): Promise<ThreadGoalSnapshot> => Promise.resolve(fakeGoal()),
+  );
+
+  public readonly clearGoalImpl = vi.fn((): Promise<null> => Promise.resolve(null));
 
   public readonly interruptTurnImpl = vi.fn(
     (_turnId?: TurnId): Promise<void> => Promise.resolve(undefined),
@@ -137,6 +156,10 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
 
   sendTurn(input: CodexSessionRuntimeSendTurnInput) {
     return Effect.promise(() => this.sendTurnImpl(input));
+  }
+
+  getGoal() {
+    return Effect.promise(() => this.getGoalImpl());
   }
 
   setGoal(objective: string) {
@@ -398,11 +421,13 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       const setThreadGoal = adapter.setThreadGoal;
       NodeAssert.ok(setThreadGoal);
 
+      yield* setThreadGoal({ threadId, operation: "get" });
       yield* setThreadGoal({ threadId, operation: "set", objective: "Finish the migration" });
       yield* setThreadGoal({ threadId, operation: "pause" });
       yield* setThreadGoal({ threadId, operation: "resume" });
       yield* setThreadGoal({ threadId, operation: "clear" });
 
+      NodeAssert.equal(runtime.getGoalImpl.mock.calls.length, 1);
       NodeAssert.deepStrictEqual(runtime.setGoalImpl.mock.calls, [["Finish the migration"]]);
       NodeAssert.equal(runtime.pauseGoalImpl.mock.calls.length, 1);
       NodeAssert.equal(runtime.resumeGoalImpl.mock.calls.length, 1);

@@ -298,6 +298,12 @@ it.effect("accepts bootstrap metadata in thread.turn.start", () =>
 
 it.effect("decodes native thread goal commands and requires a set objective", () =>
   Effect.gen(function* () {
+    const get = yield* decodeOrchestrationCommand({
+      type: "thread.goal.get",
+      commandId: "cmd-goal-get",
+      threadId: "thread-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
     const set = yield* decodeOrchestrationCommand({
       type: "thread.goal.set",
       commandId: "cmd-goal-set",
@@ -324,6 +330,7 @@ it.effect("decodes native thread goal commands and requires a set objective", ()
       createdAt: "2026-01-01T00:00:00.000Z",
     });
 
+    assert.strictEqual(get.type, "thread.goal.get");
     assert.strictEqual(set.type, "thread.goal.set");
     if (set.type === "thread.goal.set") {
       assert.strictEqual(set.objective, "Finish the migration");
@@ -354,6 +361,20 @@ it.effect("decodes correlated thread goal activity payloads", () =>
     assert.strictEqual(parsed.commandId, "cmd-goal-set");
     assert.strictEqual(parsed.operation, "set");
     assert.strictEqual(parsed.objective, "Finish the migration");
+
+    const read = yield* decodeThreadGoalActivityPayload({
+      commandId: "cmd-goal-get",
+      operation: "get",
+      goal: {
+        objective: "Finish the migration",
+        status: "active",
+        tokensUsed: 42,
+        timeUsedSeconds: 7,
+        tokenBudget: 1000,
+      },
+    });
+    assert.strictEqual(read.goal?.objective, "Finish the migration");
+    assert.strictEqual(read.goal?.tokensUsed, 42);
 
     const invalid = yield* Effect.exit(
       decodeThreadGoalActivityPayload({
