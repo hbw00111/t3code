@@ -15,20 +15,20 @@ describe("ResourceMonitorBinary", () => {
   it.effect("does not inspect Linux libc on non-Linux hosts", () =>
     Effect.gen(function* () {
       const report = process.report;
-      const originalGetReport = report?.getReport;
+      assert.isDefined(report);
+      const originalGetReport = report.getReport;
+      assert.isFunction(originalGetReport);
       let reportReads = 0;
 
-      if (report && originalGetReport) {
-        report.getReport = ((...args: Parameters<typeof originalGetReport>) => {
-          reportReads += 1;
-          return originalGetReport(...args);
-        }) as typeof originalGetReport;
-        yield* Effect.addFinalizer(() =>
-          Effect.sync(() => {
-            report.getReport = originalGetReport;
-          }),
-        );
-      }
+      report.getReport = (() => {
+        reportReads += 1;
+        return { header: {} } as ReturnType<typeof originalGetReport>;
+      }) as typeof originalGetReport;
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          report.getReport = originalGetReport;
+        }),
+      );
 
       yield* ResourceMonitorBinary.make().pipe(
         Effect.provide(ServerConfig.layerTest(process.cwd(), process.cwd())),
