@@ -158,10 +158,13 @@ describe("makeManagedServerProvider", () => {
         const checkStarted = yield* Deferred.make<void>();
         const releaseCheck = yield* Deferred.make<void>();
         const checkCalls = yield* Ref.make(0);
+        const getSettingsCalls = yield* Ref.make(0);
 
         const provider = yield* makeManagedServerProvider<TestSettings>({
           maintenanceCapabilities,
-          getSettings: Effect.succeed({ enabled: true }),
+          getSettings: Ref.updateAndGet(getSettingsCalls, (count) => count + 1).pipe(
+            Effect.as({ enabled: true }),
+          ),
           streamSettings: Stream.empty,
           haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
           initialSnapshot: () => Effect.succeed(initialSnapshot),
@@ -176,6 +179,47 @@ describe("makeManagedServerProvider", () => {
         yield* Effect.yieldNow;
         assert.strictEqual(yield* Ref.get(checkCalls), 0);
         assert.deepStrictEqual(yield* provider.getSnapshot, initialSnapshot);
+
+        yield* Deferred.succeed(activation, undefined);
+        yield* Deferred.await(checkStarted);
+        assert.strictEqual(yield* Ref.get(checkCalls), 1);
+        assert.strictEqual(yield* Ref.get(getSettingsCalls), 2);
+
+        yield* Deferred.succeed(releaseCheck, undefined);
+      }),
+    ).pipe(Effect.provide(AlwaysRunTestLayer)),
+  );
+
+  it.effect("parks settings-driven provider checks until server activation", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const activation = yield* Deferred.make<void>();
+        const settingsEmitted = yield* Deferred.make<void>();
+        const checkStarted = yield* Deferred.make<void>();
+        const releaseCheck = yield* Deferred.make<void>();
+        const checkCalls = yield* Ref.make(0);
+
+        yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.fromEffect(
+            Deferred.succeed(settingsEmitted, undefined).pipe(
+              Effect.as({ enabled: false } satisfies TestSettings),
+            ),
+          ),
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Ref.update(checkCalls, (count) => count + 1).pipe(
+            Effect.tap(() => Deferred.succeed(checkStarted, undefined)),
+            Effect.andThen(Deferred.await(releaseCheck)),
+            Effect.as(refreshedSnapshot),
+          ),
+          refreshInterval: "1 hour",
+        }).pipe(Effect.provideService(ServerActivation, Deferred.await(activation)));
+
+        yield* Deferred.await(settingsEmitted);
+        yield* Effect.yieldNow;
+        assert.strictEqual(yield* Ref.get(checkCalls), 0);
 
         yield* Deferred.succeed(activation, undefined);
         yield* Deferred.await(checkStarted);
