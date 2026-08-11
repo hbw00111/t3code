@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
+import { i18n } from "../i18n";
 
 import {
   canCheckForUpdate,
@@ -268,6 +269,29 @@ describe("desktop update UI helpers", () => {
     );
 
     expect(message).not.toContain("may remain closed for several minutes");
+  });
+
+  it("localizes update tooltips, architecture warnings, and install confirmation", () => {
+    const zhT = i18n.getFixedT("zh-CN");
+    const state: DesktopUpdateState = {
+      ...baseState,
+      hostArch: "arm64",
+      appArch: "x64",
+      runningUnderArm64Translation: true,
+      status: "available",
+      availableVersion: "1.1.0",
+    };
+
+    expect(getDesktopUpdateButtonTooltip(state, zhT)).toBe("版本 1.1.0 已可下载");
+    expect(getArm64IntelBuildWarningDescription(state, zhT)).toContain(
+      "下载可用更新即可切换为 Apple 芯片原生版本",
+    );
+    expect(getDesktopUpdateInstallConfirmationMessage(state, "Win32", zhT)).toContain(
+      "安装更新 1.1.0 并重启 T3 Code？",
+    );
+    expect(getDesktopUpdateInstallConfirmationMessage(state, "Win32", zhT)).toContain(
+      "安装完成后，T3 Code 会自动重新打开",
+    );
   });
 });
 

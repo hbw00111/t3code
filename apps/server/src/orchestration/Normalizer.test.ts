@@ -70,4 +70,38 @@ describe("canonicalizeClientCommandTimestamps", () => {
     expect(result.createdAt).toBe(serverReceivedAt);
     expect(result.bootstrap?.createThread?.createdAt).toBe(serverReceivedAt);
   });
+
+  it("replaces both timestamps when a goal bootstraps a thread", () => {
+    const command: ClientOrchestrationCommand = {
+      type: "thread.goal.set",
+      commandId: CommandId.make("command-goal"),
+      threadId: ThreadId.make("thread-goal"),
+      objective: "Finish the migration",
+      bootstrap: {
+        createThread: {
+          projectId: ProjectId.make("project-1"),
+          title: "Goal bootstrap",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5.4",
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: clientCreatedAt,
+        },
+      },
+      createdAt: clientCreatedAt,
+    };
+
+    const result = canonicalizeClientCommandTimestamps(command, serverReceivedAt);
+
+    expect(result.type).toBe("thread.goal.set");
+    if (result.type !== "thread.goal.set") {
+      throw new Error("Expected a thread.goal.set command");
+    }
+    expect(result.createdAt).toBe(serverReceivedAt);
+    expect(result.bootstrap?.createThread?.createdAt).toBe(serverReceivedAt);
+  });
 });

@@ -70,6 +70,7 @@ Full docs live in [docs/](./docs). There's no docs site yet.
 - [Keyboard shortcuts](./docs/user/keybindings.md)
 - [Change the interface language](./docs/user/interface-language.md)
 - [Drag local files into a message](./docs/user/drag-local-files.md)
+- [Keep a Codex thread working toward a goal](./docs/user/codex-goals.md)
 - [Customize a project icon](./docs/user/project-settings.md)
 - [Remote access from a phone or another machine](./docs/user/remote-access.md)
 - [Keeping app and server in sync](./docs/user/updating.md)

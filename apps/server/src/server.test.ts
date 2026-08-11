@@ -7487,6 +7487,148 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("bootstraps first-send worktree goals on the server before dispatching goal set", () =>
+    Effect.gen(function* () {
+      const dispatchedCommands: Array<OrchestrationCommand> = [];
+      const createWorktree = vi.fn(
+        (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>
+          Effect.succeed({
+            worktree: {
+              refName: "t3code/goal-bootstrap",
+              path: "/tmp/goal-bootstrap-worktree",
+            },
+          }),
+      );
+      const refreshStatus = vi.fn((_: string) =>
+        Effect.succeed({
+          isRepo: true,
+          hasPrimaryRemote: true,
+          isDefaultRef: false,
+          refName: "t3code/goal-bootstrap",
+          hasWorkingTreeChanges: false,
+          workingTree: {
+            files: [],
+            insertions: 0,
+            deletions: 0,
+          },
+          hasUpstream: false,
+          aheadCount: 0,
+          behindCount: 0,
+          pr: null,
+        }),
+      );
+      const runForThread = vi.fn(
+        (
+          _: Parameters<
+            ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]["runForThread"]
+          >[0],
+        ) =>
+          Effect.succeed({
+            status: "started" as const,
+            scriptId: "setup",
+            scriptName: "Setup",
+            terminalId: "setup-setup",
+            cwd: "/tmp/goal-bootstrap-worktree",
+          }),
+      );
+
+      yield* buildAppUnderTest({
+        layers: {
+          gitVcsDriver: {
+            createWorktree,
+          },
+          vcsStatusBroadcaster: {
+            refreshStatus,
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                return { sequence: dispatchedCommands.length };
+              }),
+            readEvents: () => Stream.empty,
+          },
+          projectSetupScriptRunner: {
+            runForThread,
+          },
+        },
+      });
+
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.goal.set",
+            commandId: CommandId.make("cmd-bootstrap-goal-set"),
+            threadId: ThreadId.make("thread-goal-bootstrap"),
+            objective: "Finish the migration",
+            bootstrap: {
+              createThread: {
+                projectId: defaultProjectId,
+                title: "Goal Bootstrap Thread",
+                modelSelection: defaultModelSelection,
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                branch: "main",
+                worktreePath: null,
+                createdAt,
+              },
+              prepareWorktree: {
+                projectCwd: "/tmp/project",
+                baseBranch: "main",
+                branch: "t3code/goal-bootstrap",
+              },
+              runSetupScript: true,
+            },
+            createdAt,
+          }),
+        ),
+      );
+
+      assert.equal(response.sequence, 5);
+      assert.deepEqual(
+        dispatchedCommands.map((command) => command.type),
+        [
+          "thread.create",
+          "thread.meta.update",
+          "thread.activity.append",
+          "thread.activity.append",
+          "thread.goal.set",
+        ],
+      );
+      assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
+        cwd: "/tmp/project",
+        refName: "main",
+        newRefName: "t3code/goal-bootstrap",
+        baseRefName: "main",
+        path: null,
+      });
+      assert.deepEqual(runForThread.mock.calls[0]?.[0], {
+        threadId: ThreadId.make("thread-goal-bootstrap"),
+        projectId: defaultProjectId,
+        projectCwd: "/tmp/project",
+        worktreePath: "/tmp/goal-bootstrap-worktree",
+      });
+      assert.deepEqual(refreshStatus.mock.calls[0]?.[0], "/tmp/goal-bootstrap-worktree");
+
+      const setupActivities = dispatchedCommands.filter(
+        (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
+          command.type === "thread.activity.append",
+      );
+      assert.deepEqual(
+        setupActivities.map((command) => command.activity.kind),
+        ["setup-script.requested", "setup-script.started"],
+      );
+      const finalCommand = dispatchedCommands[4];
+      assertTrue(finalCommand?.type === "thread.goal.set");
+      if (finalCommand?.type === "thread.goal.set") {
+        assert.equal(finalCommand.objective, "Finish the migration");
+        assert.equal(finalCommand.bootstrap, undefined);
+      }
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect(
     "falls back to the local base branch when startFromOrigin is set but no origin remote exists",
     () =>

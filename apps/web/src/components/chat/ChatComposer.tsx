@@ -229,6 +229,7 @@ import { formatProviderSkillDisplayName } from "../../providerSkillPresentation"
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
+import { providerSupportsThreadGoals } from "../../threadGoalActivity";
 
 const runtimeModeOptions: RuntimeMode[] = [
   "approval-required",
@@ -987,6 +988,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerMenuOpenRef = useRef(false);
   const composerMenuItemsRef = useRef<ComposerCommandItem[]>([]);
   const activeComposerMenuItemRef = useRef<ComposerCommandItem | null>(null);
+  const dismissedComposerTriggerRef = useRef<{ value: string; expandedCursor: number } | null>(
+    null,
+  );
   const composerBlurFrameRef = useRef<number | null>(null);
   const mobileComposerExpandFrameRef = useRef<number | null>(null);
   const mobileComposerExpandReleaseFrameRef = useRef<number | null>(null);
@@ -1007,6 +1011,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
    * next draft.
    */
   const pendingImageCompressionsRef = useRef<Map<ThreadId, number>>(new Map());
+
+  const detectUndismissedComposerTrigger = useCallback((value: string, expandedCursor: number) => {
+    const dismissed = dismissedComposerTriggerRef.current;
+    if (dismissed) {
+      if (dismissed.value === value && dismissed.expandedCursor === expandedCursor) {
+        return null;
+      }
+      dismissedComposerTriggerRef.current = null;
+    }
+    return detectComposerTrigger(value, expandedCursor);
+  }, []);
 
   // ------------------------------------------------------------------
   // Derived: composer send state
@@ -1065,21 +1080,25 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           label: "/model",
           description: t("chat.chooseModel"),
         },
-        ...(planModeUiEnabled
+        ...(providerSupportsThreadGoals(selectedProvider)
+          ? ([
+              {
+                id: "slash:goal",
+                type: "slash-command",
+                command: "goal",
+                label: t("chat.goal"),
+                description: t("chat.setPersistentGoal"),
+              },
+            ] as const)
+          : []),
+        ...(getProviderInteractionModeToggle(providerStatuses, selectedProvider)
           ? ([
               {
                 id: "slash:plan",
                 type: "slash-command",
                 command: "plan",
-                label: "/plan",
-                description: t("chat.switchToPlanMode"),
-              },
-              {
-                id: "slash:default",
-                type: "slash-command",
-                command: "default",
-                label: "/default",
-                description: t("chat.switchToBuildMode"),
+                label: t("chat.planMode"),
+                description: t("chat.togglePlanMode"),
               },
             ] as const)
           : []),
@@ -1119,7 +1138,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return [];
   }, [
     composerTrigger,
-    planModeUiEnabled,
+    providerStatuses,
     selectedProvider,
     selectedProviderStatus,
     t,
@@ -1417,6 +1436,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Reset compositor state on thread/draft change
   // ------------------------------------------------------------------
   useEffect(() => {
+    dismissedComposerTriggerRef.current = null;
     setComposerHighlightedItemId(null);
     setComposerCursor(collapseExpandedComposerCursor(promptRef.current, promptRef.current.length));
     setComposerTrigger(detectComposerTrigger(promptRef.current, promptRef.current.length));
@@ -1552,7 +1572,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       if (activePendingProgress?.activeQuestion && pendingUserInputs.length > 0) {
         setComposerCursor(nextCursor);
         setComposerTrigger(
-          cursorAdjacentToMention ? null : detectComposerTrigger(nextPrompt, expandedCursor),
+          cursorAdjacentToMention
+            ? null
+            : detectUndismissedComposerTrigger(nextPrompt, expandedCursor),
         );
         onChangeActivePendingUserInputCustomAnswer(
           activePendingProgress.activeQuestion.id,
@@ -1573,7 +1595,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
       setComposerCursor(nextCursor);
       setComposerTrigger(
-        cursorAdjacentToMention ? null : detectComposerTrigger(nextPrompt, expandedCursor),
+        cursorAdjacentToMention
+          ? null
+          : detectUndismissedComposerTrigger(nextPrompt, expandedCursor),
       );
     },
     [
@@ -1585,6 +1609,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       composerDraftTarget,
       composerTerminalContexts,
       setComposerDraftTerminalContexts,
+      detectUndismissedComposerTrigger,
     ],
   );
 
@@ -1624,7 +1649,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         setPrompt(next.text);
       }
       setComposerCursor(nextCursor);
-      setComposerTrigger(detectComposerTrigger(next.text, nextExpandedCursor));
+      setComposerTrigger(detectUndismissedComposerTrigger(next.text, nextExpandedCursor));
       if (options?.focusEditorAfterReplace !== false) {
         window.requestAnimationFrame(() => {
           composerEditorRef.current?.focusAt(nextCursor);
@@ -1636,6 +1661,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       activePendingProgress?.activeQuestion,
       activePendingUserInput,
       onChangeActivePendingUserInputCustomAnswer,
+      detectUndismissedComposerTrigger,
       promptRef,
       setPrompt,
     ],
@@ -1666,9 +1692,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     const snapshot = readComposerSnapshot();
     return {
       snapshot,
-      trigger: detectComposerTrigger(snapshot.value, snapshot.expandedCursor),
+      trigger: detectUndismissedComposerTrigger(snapshot.value, snapshot.expandedCursor),
     };
-  }, [readComposerSnapshot]);
+  }, [detectUndismissedComposerTrigger, readComposerSnapshot]);
 
   const onSelectComposerItem = useCallback(
     (item: ComposerCommandItem) => {
@@ -1709,7 +1735,30 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           }
           return;
         }
-        void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
+        if (item.command === "goal") {
+          const replacement = "/goal ";
+          const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+            snapshot.value,
+            trigger.rangeEnd,
+            replacement,
+          );
+          const applied = applyPromptReplacement(
+            trigger.rangeStart,
+            replacementRangeEnd,
+            replacement,
+            { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+          );
+          if (applied) {
+            setComposerHighlightedItemId(null);
+            if (interactionMode === "plan") {
+              void handleInteractionModeChange("default");
+            }
+          }
+          return;
+        }
+        void handleInteractionModeChange(
+          item.command === "plan" && interactionMode !== "plan" ? "plan" : "default",
+        );
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
         });
@@ -1755,7 +1804,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return;
       }
     },
-    [applyPromptReplacement, handleInteractionModeChange, resolveActiveComposerTrigger],
+    [
+      applyPromptReplacement,
+      handleInteractionModeChange,
+      interactionMode,
+      resolveActiveComposerTrigger,
+    ],
   );
 
   const onComposerMenuItemHighlighted = useCallback(
@@ -1840,8 +1894,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         event?.preventDefault();
         toastManager.add({
           type: "info",
-          title: "Still compressing a pasted image.",
-          description: "Send again once its thumbnail appears.",
+          title: t("chat.compressingPastedImage"),
+          description: t("chat.sendAfterThumbnailAppears"),
         });
         return;
       }
@@ -1857,6 +1911,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       noProviderAvailable,
       onSend,
       shouldBlurMobileComposerOnSubmit,
+      t,
     ],
   );
   const expandMobileComposer = useCallback(() => {
@@ -1886,9 +1941,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Callbacks: command key
   // ------------------------------------------------------------------
   const onComposerCommandKey = (
-    key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab",
+    key: "ArrowDown" | "ArrowUp" | "Enter" | "Escape" | "Tab",
     event: KeyboardEvent,
   ) => {
+    if (key === "Escape") {
+      const { snapshot, trigger } = resolveActiveComposerTrigger();
+      if (!composerMenuOpenRef.current && !trigger) return false;
+      dismissedComposerTriggerRef.current = {
+        value: snapshot.value,
+        expandedCursor: snapshot.expandedCursor,
+      };
+      setComposerTrigger(null);
+      setComposerHighlightedItemId(null);
+      setComposerHighlightedSearchKey(null);
+      return true;
+    }
     if (key === "Tab" && event.shiftKey) {
       if (!planModeUiEnabled) return false;
       toggleInteractionMode();
@@ -2304,7 +2371,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (pendingUserInputs.length > 0) {
       toastManager.add({
         type: "error",
-        title: "Attach images after answering plan questions.",
+        title: t("chat.attachImagesAfterPlanQuestions"),
       });
       return;
     }
@@ -2322,11 +2389,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     let error: string | null = null;
     for (const file of files) {
       if (!file.type.startsWith("image/")) {
-        error = `Unsupported file type for '${file.name}'. Please attach image files only.`;
+        error = t("chat.unsupportedImageFileType", { name: file.name });
         continue;
       }
       if (reservedCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
-        error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} images per message.`;
+        error = t("chat.imageAttachmentLimit", { count: PROVIDER_SEND_TURN_MAX_ATTACHMENTS });
         break;
       }
       acceptedFiles.push(file);
@@ -2346,8 +2413,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         if (!compressed.ok) {
           compressionError =
             compressed.reason === "unreadable"
-              ? `'${file.name}' could not be read as an image.`
-              : `'${file.name}' is too large to attach, even after compression.`;
+              ? t("chat.imageUnreadable", { name: file.name })
+              : t("chat.imageTooLarge", { name: file.name });
           continue;
         }
         const attachmentFile = compressed.file;
@@ -2444,8 +2511,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ) {
       toastManager.add({
         type: "error",
-        title: "Unable to add to chat",
-        description: "The composer is busy; try again once it is ready.",
+        title: t("chat.unableAddToChat"),
+        description: t("chat.composerBusyTryAgain"),
       });
     }
     void addComposerImages(Array.from(drop.attachmentFiles));
@@ -2486,8 +2553,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onInsertRejected: () => {
       toastManager.add({
         type: "error",
-        title: "Unable to add to chat",
-        description: "The composer is busy; try again once it is ready.",
+        title: t("chat.unableAddToChat"),
+        description: t("chat.composerBusyTryAgain"),
       });
     },
   });

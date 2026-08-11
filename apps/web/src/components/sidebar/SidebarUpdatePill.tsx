@@ -1,5 +1,6 @@
 import { DownloadIcon, RotateCwIcon, TriangleAlertIcon, XIcon } from "lucide-react";
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { isElectron } from "../../env";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -35,6 +36,8 @@ function SidebarUpdateReleaseNotesTooltip({
   readonly state: NonNullable<ReturnType<typeof useDesktopUpdateState>>;
   readonly tooltip: string;
 }) {
+  const { t } = useTranslation();
+
   if (state.channel !== "nightly" || state.releaseNotes.length === 0) {
     return <>{tooltip}</>;
   }
@@ -50,7 +53,9 @@ function SidebarUpdateReleaseNotesTooltip({
             {index > 0 && <Separator className="my-3 bg-border/60" />}
             <section>
               <h3 className="text-muted-foreground text-xs leading-4 font-semibold">
-                {index === 0 ? "What's changed" : `Changes in ${releaseNote.version}`}
+                {index === 0
+                  ? t("desktopUpdate.whatsChanged")
+                  : t("desktopUpdate.changesInVersion", { version: releaseNote.version })}
               </h3>
               <ul className="mt-2 space-y-1.5 pl-4 text-xs leading-5 text-popover-foreground/90">
                 {keyReleaseNoteItems(releaseNote.items).map(({ item, key }) => (
@@ -68,17 +73,20 @@ function SidebarUpdateReleaseNotesTooltip({
 }
 
 export function SidebarUpdatePill() {
+  const { t } = useTranslation();
   const state = useDesktopUpdateState();
   const [dismissed, setDismissed] = useState(false);
 
   const visible = isElectron && shouldShowDesktopUpdateButton(state) && !dismissed;
-  const tooltip = state ? getDesktopUpdateButtonTooltip(state) : "Update available";
+  const tooltip = state
+    ? getDesktopUpdateButtonTooltip(state, t)
+    : t("desktopUpdate.updateAvailable");
   const disabled = isDesktopUpdateButtonDisabled(state);
   const action = state ? resolveDesktopUpdateButtonAction(state) : "none";
 
   const showArm64Warning = isElectron && shouldShowArm64IntelBuildWarning(state);
   const arm64Description =
-    state && showArm64Warning ? getArm64IntelBuildWarningDescription(state) : null;
+    state && showArm64Warning ? getArm64IntelBuildWarningDescription(state, t) : null;
 
   const handleAction = useCallback(() => {
     const bridge = window.desktopBridge;
@@ -98,7 +106,7 @@ export function SidebarUpdatePill() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Could not download update",
+              title: t("desktopUpdate.couldNotDownload"),
               description: actionError,
             }),
           );
@@ -107,8 +115,9 @@ export function SidebarUpdatePill() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Could not start update download",
-              description: error instanceof Error ? error.message : "An unexpected error occurred.",
+              title: t("desktopUpdate.couldNotStartDownload"),
+              description:
+                error instanceof Error ? error.message : t("desktopUpdate.unexpectedError"),
             }),
           );
         });
@@ -117,7 +126,7 @@ export function SidebarUpdatePill() {
 
     if (action === "install") {
       const confirmed = window.confirm(
-        getDesktopUpdateInstallConfirmationMessage(state, navigator.platform),
+        getDesktopUpdateInstallConfirmationMessage(state, navigator.platform, t),
       );
       if (!confirmed) return;
       void bridge
@@ -129,7 +138,7 @@ export function SidebarUpdatePill() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Could not install update",
+              title: t("desktopUpdate.couldNotInstall"),
               description: actionError,
             }),
           );
@@ -138,13 +147,14 @@ export function SidebarUpdatePill() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Could not install update",
-              description: error instanceof Error ? error.message : "An unexpected error occurred.",
+              title: t("desktopUpdate.couldNotInstall"),
+              description:
+                error instanceof Error ? error.message : t("desktopUpdate.unexpectedError"),
             }),
           );
         });
     }
-  }, [action, disabled, state]);
+  }, [action, disabled, state, t]);
 
   if (!visible && !showArm64Warning) return null;
 
@@ -153,7 +163,7 @@ export function SidebarUpdatePill() {
       {showArm64Warning && arm64Description && (
         <Alert variant="warning" className="rounded-2xl border-warning/40 bg-warning/8 text-xs">
           <TriangleAlertIcon />
-          <AlertTitle>Intel build on Apple Silicon</AlertTitle>
+          <AlertTitle>{t("desktopUpdate.intelBuildTitle")}</AlertTitle>
           <AlertDescription>{arm64Description}</AlertDescription>
         </Alert>
       )}
@@ -178,22 +188,23 @@ export function SidebarUpdatePill() {
                   {action === "install" ? (
                     <>
                       <RotateCwIcon className="size-3.5" />
-                      <span>Restart to update</span>
+                      <span>{t("desktopUpdate.restartToUpdate")}</span>
                     </>
                   ) : state?.status === "downloading" ? (
                     <>
                       <DownloadIcon className="size-3.5" />
                       <span>
-                        Downloading
                         {typeof state.downloadPercent === "number"
-                          ? ` (${Math.floor(state.downloadPercent)}%)`
-                          : "…"}
+                          ? t("desktopUpdate.downloadingPercent", {
+                              percent: Math.floor(state.downloadPercent),
+                            })
+                          : t("desktopUpdate.downloading")}
                       </span>
                     </>
                   ) : (
                     <>
                       <DownloadIcon className="size-3.5" />
-                      <span>Update available</span>
+                      <span>{t("desktopUpdate.updateAvailable")}</span>
                     </>
                   )}
                 </button>
@@ -223,7 +234,7 @@ export function SidebarUpdatePill() {
                 render={
                   <button
                     type="button"
-                    aria-label="Dismiss update"
+                    aria-label={t("desktopUpdate.dismissUpdate")}
                     className="mr-1 inline-flex size-5 items-center justify-center rounded-md text-update-foreground transition-colors"
                     onClick={() => setDismissed(true)}
                   >
@@ -231,7 +242,7 @@ export function SidebarUpdatePill() {
                   </button>
                 }
               />
-              <TooltipPopup side="top">Dismiss until next launch</TooltipPopup>
+              <TooltipPopup side="top">{t("desktopUpdate.dismissUntilNextLaunch")}</TooltipPopup>
             </Tooltip>
           )}
         </div>

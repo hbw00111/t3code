@@ -3,6 +3,8 @@ import { useAtomValue } from "@effect/atom-react";
 import { DownloadIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { type ProviderDriverKind, type ProviderInstanceId } from "@t3tools/contracts";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 
 import { primaryServerProvidersAtom, serverEnvironment } from "../state/server";
 import { usePrimaryEnvironment } from "../state/environments";
@@ -34,6 +36,7 @@ type ActiveProviderUpdateToast =
       readonly toastId: ProviderUpdateToastId;
       readonly providerInstanceIds: ReadonlySet<ProviderInstanceId>;
       readonly providerCount: number;
+      readonly resolveView?: (t: TFunction) => ProviderUpdateToastView;
     };
 
 function ProviderUpdateToastIcon({ provider }: { provider: ProviderDriverKind }) {
@@ -61,6 +64,8 @@ function updateProviderUpdateToast(input: {
   readonly toastId: ProviderUpdateToastId;
   readonly view: ProviderUpdateToastView;
   readonly openSettings: () => void;
+  readonly onClose: () => void;
+  readonly t: TFunction;
 }) {
   if (input.view.type === "loading" || input.view.type === "success") {
     toastManager.update(input.toastId, {
@@ -74,6 +79,7 @@ function updateProviderUpdateToast(input: {
       actionProps: undefined,
       data: {
         hideCopyButton: true,
+        onClose: input.onClose,
         ...(input.view.dismissAfterVisibleMs !== undefined
           ? { dismissAfterVisibleMs: input.view.dismissAfterVisibleMs }
           : {}),
@@ -90,19 +96,16 @@ function updateProviderUpdateToast(input: {
       description: input.view.description,
       timeout: 0,
       actionProps: {
-        children: "Settings",
+        children: input.t("common.settings"),
         onClick: input.openSettings,
       },
       actionVariant: "outline",
       data: {
         hideCopyButton: true,
+        onClose: input.onClose,
       },
     }),
   );
-}
-
-function isTerminalProviderUpdateToastView(view: ProviderUpdateToastView) {
-  return view.phase === "failed" || view.phase === "unchanged" || view.phase === "succeeded";
 }
 
 /**
@@ -111,6 +114,8 @@ function isTerminalProviderUpdateToastView(view: ProviderUpdateToastView) {
  * per-environment split is gated behind WSL presence.
  */
 export function ProviderUpdatePrimaryNotification() {
+  const { t, i18n } = useTranslation();
+  const language = i18n.resolvedLanguage ?? i18n.language;
   const navigate = useNavigate();
   const providers = useAtomValue(primaryServerProvidersAtom);
   const primaryEnvironment = usePrimaryEnvironment();
@@ -118,6 +123,9 @@ export function ProviderUpdatePrimaryNotification() {
     reportFailure: false,
   });
   const activeToastRef = useRef<ActiveProviderUpdateToast | null>(null);
+  const promptLanguageRef = useRef(language);
+  const translationRef = useRef(t);
+  translationRef.current = t;
   const { dismissedNotificationKeys, dismissNotificationKey } =
     useDismissedProviderUpdateNotificationKeys();
 
@@ -132,6 +140,23 @@ export function ProviderUpdatePrimaryNotification() {
       }
     };
   }, []);
+
+  // Prompt toasts are imperative and otherwise keep the copy from the language
+  // they were created with. Recreate only idle prompts; in-flight updates are
+  // refreshed by the progress effect below so their operation stays intact.
+  useEffect(() => {
+    if (promptLanguageRef.current === language) {
+      return;
+    }
+    promptLanguageRef.current = language;
+    const activeToast = activeToastRef.current;
+    if (activeToast?.kind !== "prompt") {
+      return;
+    }
+    toastManager.close(activeToast.toastId);
+    seenProviderUpdateNotificationKeys.delete(activeToast.key);
+    activeToastRef.current = null;
+  }, [language]);
 
   const updateProviders = useMemo(() => collectProviderUpdateCandidates(providers), [providers]);
   const notificationKey = useMemo(
@@ -160,33 +185,48 @@ export function ProviderUpdatePrimaryNotification() {
     [navigate],
   );
 
+  const handleProviderUpdateToastClose = useCallback((toastId: ProviderUpdateToastId) => {
+    if (activeToastRef.current?.toastId === toastId) {
+      activeToastRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     const activeToast = activeToastRef.current;
     if (activeToast?.kind !== "update") {
       return;
     }
 
-    const activeProviders = providers.filter((provider) =>
-      activeToast.providerInstanceIds.has(provider.instanceId),
-    );
-    const view = getProviderUpdateProgressToastView({
-      providers: activeProviders,
-      providerCount: activeToast.providerCount,
-    });
+    const view = activeToast.resolveView
+      ? activeToast.resolveView(t)
+      : getProviderUpdateProgressToastView(
+          {
+            providers: providers.filter((provider) =>
+              activeToast.providerInstanceIds.has(provider.instanceId),
+            ),
+            providerCount: activeToast.providerCount,
+          },
+          t,
+        );
     updateProviderUpdateToast({
       toastId: activeToast.toastId,
       view,
       openSettings: () => openProviderSettings(activeToast.toastId),
+      onClose: () => handleProviderUpdateToastClose(activeToast.toastId),
+      t,
     });
 
-    if (isTerminalProviderUpdateToastView(view)) {
+    if (view.phase === "succeeded") {
       activeToastRef.current = null;
     }
-  }, [providers, openProviderSettings]);
+  }, [handleProviderUpdateToastClose, language, providers, openProviderSettings, t]);
 
   useEffect(() => {
     const activeToast = activeToastRef.current;
-    if (activeToast?.kind === "prompt" && activeToast.key !== notificationKey) {
+    const staleReplaceableToast =
+      activeToast?.kind === "prompt" ||
+      (activeToast?.kind === "update" && activeToast.resolveView !== undefined);
+    if (staleReplaceableToast && activeToast.key !== notificationKey) {
       toastManager.close(activeToast.toastId);
       activeToastRef.current = null;
     }
@@ -202,13 +242,17 @@ export function ProviderUpdatePrimaryNotification() {
 
     seenProviderUpdateNotificationKeys.add(notificationKey);
 
-    const initialView = getProviderUpdateInitialToastView({ updateProviders, oneClickProviders });
+    const initialView = getProviderUpdateInitialToastView(
+      { updateProviders, oneClickProviders },
+      t,
+    );
 
     let toastId!: ProviderUpdateToastId;
     let updateStarted = false;
     const openSettings = () => openProviderSettings(toastId);
     const dismissPrompt = () => {
       dismissNotificationKey(notificationKey);
+      handleProviderUpdateToastClose(toastId);
     };
 
     const runUpdates = () => {
@@ -229,12 +273,14 @@ export function ProviderUpdatePrimaryNotification() {
 
       updateProviderUpdateToast({
         toastId,
-        view: getProviderUpdateRunningToastView(providerCount),
+        view: getProviderUpdateRunningToastView(providerCount, t),
         openSettings,
+        onClose: () => handleProviderUpdateToastClose(toastId),
+        t,
       });
 
       void (async () => {
-        const results = [];
+        const results: Array<Awaited<ReturnType<typeof updateProvider>>> = [];
         for (const provider of oneClickProviders) {
           results.push(
             await updateProvider({
@@ -252,14 +298,23 @@ export function ProviderUpdatePrimaryNotification() {
           return;
         }
 
-        const failedMessage = firstFailedProviderUpdateMessage(results);
+        const latestT = translationRef.current;
+        const failedMessage = firstFailedProviderUpdateMessage(results, latestT);
         if (failedMessage) {
+          const resolveView = (nextT: TFunction) =>
+            getProviderUpdateRejectedToastView(
+              providerCount,
+              firstFailedProviderUpdateMessage(results, nextT) ?? failedMessage,
+              nextT,
+            );
+          activeToastRef.current = { ...activeUpdateToast, resolveView };
           updateProviderUpdateToast({
             toastId,
-            view: getProviderUpdateRejectedToastView(providerCount, failedMessage),
+            view: resolveView(latestT),
             openSettings,
+            onClose: () => handleProviderUpdateToastClose(toastId),
+            t: latestT,
           });
-          activeToastRef.current = null;
           return;
         }
 
@@ -267,17 +322,35 @@ export function ProviderUpdatePrimaryNotification() {
           results,
           providerInstanceIds,
         });
-        const view = getProviderUpdateProgressToastView({
-          providers: updatedProviderSnapshots,
-          providerCount,
-        });
+        const view = getProviderUpdateProgressToastView(
+          {
+            providers: updatedProviderSnapshots,
+            providerCount,
+          },
+          latestT,
+        );
+        if (view.phase === "failed" || view.phase === "unchanged") {
+          activeToastRef.current = {
+            ...activeUpdateToast,
+            resolveView: (nextT) =>
+              getProviderUpdateProgressToastView(
+                {
+                  providers: updatedProviderSnapshots,
+                  providerCount,
+                },
+                nextT,
+              ),
+          };
+        }
         updateProviderUpdateToast({
           toastId,
           view,
           openSettings,
+          onClose: () => handleProviderUpdateToastClose(toastId),
+          t: latestT,
         });
 
-        if (isTerminalProviderUpdateToastView(view)) {
+        if (view.phase === "succeeded") {
           activeToastRef.current = null;
         }
       })();
@@ -292,11 +365,11 @@ export function ProviderUpdatePrimaryNotification() {
         actionProps:
           oneClickProviders.length > 0
             ? {
-                children: "Update",
+                children: t("common.update"),
                 onClick: runUpdates,
               }
             : {
-                children: "Settings",
+                children: t("common.settings"),
                 onClick: openSettings,
               },
         actionVariant: oneClickProviders.length > 0 ? "default" : "outline",
@@ -310,7 +383,7 @@ export function ProviderUpdatePrimaryNotification() {
           ...(oneClickProviders.length > 0
             ? {
                 secondaryActionProps: {
-                  children: "Settings",
+                  children: t("common.settings"),
                   onClick: openSettings,
                 },
                 secondaryActionVariant: "outline" as const,
@@ -324,10 +397,13 @@ export function ProviderUpdatePrimaryNotification() {
     updateProvider,
     dismissNotificationKey,
     dismissedNotificationKeys,
+    handleProviderUpdateToastClose,
+    language,
     notificationKey,
     oneClickProviders,
     openProviderSettings,
     primaryEnvironment,
+    t,
     updateProviders,
   ]);
 

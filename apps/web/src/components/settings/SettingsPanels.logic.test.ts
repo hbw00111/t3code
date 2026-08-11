@@ -8,6 +8,7 @@ import {
 import { getBackgroundActivityPresetSettings } from "@t3tools/shared/backgroundActivitySettings";
 import * as Duration from "effect/Duration";
 import { describe, expect, it } from "vite-plus/test";
+import { i18n } from "../../i18n";
 import {
   backgroundActivitySharedPolicySettings,
   buildProviderInstanceUpdatePatch,
@@ -171,6 +172,19 @@ describe("formatDiagnosticsDescription", () => {
         otlpMetricsEnabled: false,
       }),
     ).toBe("Local trace file.");
+  });
+
+  it("formats the diagnostics summary in Simplified Chinese", () => {
+    expect(
+      formatDiagnosticsDescription(
+        {
+          localTracingEnabled: true,
+          otlpTracesEnabled: false,
+          otlpMetricsEnabled: false,
+        },
+        i18n.getFixedT("zh-CN"),
+      ),
+    ).toBe("本地跟踪文件。");
   });
 });
 

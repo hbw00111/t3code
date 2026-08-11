@@ -4,8 +4,9 @@ import {
   type ServerProviderSkill,
   type ServerProviderSlashCommand,
 } from "@t3tools/contracts";
-import { BotIcon } from "lucide-react";
+import { BotIcon, HammerIcon, LightbulbIcon, type LucideIcon, TargetIcon } from "lucide-react";
 import { memo, useLayoutEffect, useMemo, useRef } from "react";
+import { useTranslation } from "react-i18next";
 
 import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../composer-logic";
 import { formatProviderSkillInstallSource } from "~/providerSkillPresentation";
@@ -59,6 +60,18 @@ type ComposerCommandGroup = {
   items: ComposerCommandItem[];
 };
 
+const BUILT_IN_COMMAND_ICONS: Record<ComposerSlashCommand, LucideIcon> = {
+  model: BotIcon,
+  goal: TargetIcon,
+  plan: LightbulbIcon,
+  default: HammerIcon,
+};
+
+function BuiltInCommandGlyph({ command }: { readonly command: ComposerSlashCommand }) {
+  const Icon = BUILT_IN_COMMAND_ICONS[command];
+  return <Icon className="size-4 shrink-0 text-icon-muted" />;
+}
+
 function SkillGlyph(props: { className?: string }) {
   return (
     <svg
@@ -82,9 +95,10 @@ function groupCommandItems(
   items: ComposerCommandItem[],
   triggerKind: ComposerTriggerKind | null,
   groupSlashCommandSections: boolean,
+  labels: { skills: string; builtIn: string; provider: string },
 ): ComposerCommandGroup[] {
   if (triggerKind === "skill") {
-    return items.length > 0 ? [{ id: "skills", label: "Skills", items }] : [];
+    return items.length > 0 ? [{ id: "skills", label: labels.skills, items }] : [];
   }
   if (triggerKind !== "slash-command" || !groupSlashCommandSections) {
     return [{ id: "default", label: null, items }];
@@ -95,10 +109,10 @@ function groupCommandItems(
 
   const groups: ComposerCommandGroup[] = [];
   if (builtInItems.length > 0) {
-    groups.push({ id: "built-in", label: "Built-in", items: builtInItems });
+    groups.push({ id: "built-in", label: labels.builtIn, items: builtInItems });
   }
   if (providerItems.length > 0) {
-    groups.push({ id: "provider", label: "Provider", items: providerItems });
+    groups.push({ id: "provider", label: labels.provider, items: providerItems });
   }
   return groups;
 }
@@ -114,11 +128,16 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
   onHighlightedItemChange: (itemId: string | null) => void;
   onSelect: (item: ComposerCommandItem) => void;
 }) {
+  const { t } = useTranslation();
   const listRef = useRef<HTMLDivElement>(null);
   const groups = useMemo(
     () =>
-      groupCommandItems(props.items, props.triggerKind, props.groupSlashCommandSections ?? true),
-    [props.groupSlashCommandSections, props.items, props.triggerKind],
+      groupCommandItems(props.items, props.triggerKind, props.groupSlashCommandSections ?? true, {
+        skills: t("chat.skills"),
+        builtIn: t("chat.builtInCommands"),
+        provider: t("chat.providerCommands"),
+      }),
+    [props.groupSlashCommandSections, props.items, props.triggerKind, t],
   );
 
   useLayoutEffect(() => {
@@ -173,23 +192,22 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
             {props.triggerKind === "skill" ? (
               <CommandGroup>
                 <CommandGroupLabel className="px-0 pt-0 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-secondary-label">
-                  Skills
+                  {t("chat.skills")}
                 </CommandGroupLabel>
                 <p className="text-secondary-label text-xs">
                   {props.isLoading
-                    ? "Searching workspace skills..."
-                    : (props.emptyStateText ??
-                      "No skills found. Try / to browse provider commands.")}
+                    ? t("chat.searchingWorkspaceSkills")
+                    : (props.emptyStateText ?? t("chat.noSkillsFound"))}
                 </p>
               </CommandGroup>
             ) : (
               <p className="text-secondary-label text-xs">
                 {props.isLoading
-                  ? "Searching workspace files..."
+                  ? t("chat.searchingWorkspaceFiles")
                   : (props.emptyStateText ??
                     (props.triggerKind === "path"
-                      ? "No matching files or folders."
-                      : "No matching command."))}
+                      ? t("chat.noMatchingFilesOrFolders")
+                      : t("chat.noMatchingCommand")))}
               </p>
             )}
           </div>
@@ -235,7 +253,7 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
         />
       ) : null}
       {props.item.type === "slash-command" ? (
-        <BotIcon className="size-4 shrink-0 text-icon-muted" />
+        <BuiltInCommandGlyph command={props.item.command} />
       ) : null}
       {props.item.type === "provider-slash-command" ? (
         <span className="inline-flex size-4 shrink-0 items-center justify-center text-icon-muted">

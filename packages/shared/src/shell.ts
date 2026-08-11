@@ -193,9 +193,10 @@ export function extractPathFromShellOutput(output: string): string | null {
 
 export function readPathFromLoginShell(
   shell: string,
+  platform: NodeJS.Platform,
   execFile: ExecFileSyncLike = NodeChildProcess.execFileSync,
 ): string | undefined {
-  return readEnvironmentFromLoginShell(shell, ["PATH"], execFile).PATH;
+  return readEnvironmentFromLoginShell(shell, ["PATH"], platform, execFile).PATH;
 }
 
 export function readPathFromLaunchctl(
@@ -300,23 +301,29 @@ function extractEnvironmentValue(output: string, name: string): string | undefin
 export type ShellEnvironmentReader = (
   shell: string,
   names: ReadonlyArray<string>,
+  platform: NodeJS.Platform,
   execFile?: ExecFileSyncLike,
 ) => Partial<Record<string, string>>;
 
 export const readEnvironmentFromLoginShell: ShellEnvironmentReader = (
   shell,
   names,
+  platform,
   execFile = NodeChildProcess.execFileSync,
 ) => {
   if (names.length === 0) {
     return {};
   }
 
-  const output = execFile(shell, ["-ilc", buildEnvironmentCaptureCommand(names)], {
-    encoding: "utf8",
-    timeout: 5000,
-    killSignal: "SIGKILL",
-  });
+  const output = execFile(
+    shell,
+    [platform === "darwin" ? "-lc" : "-ilc", buildEnvironmentCaptureCommand(names)],
+    {
+      encoding: "utf8",
+      timeout: 5000,
+      killSignal: "SIGKILL",
+    },
+  );
 
   const environment: Partial<Record<string, string>> = {};
   for (const name of names) {

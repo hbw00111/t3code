@@ -136,6 +136,10 @@ export interface CodexSessionRuntimeShape {
   readonly sendTurn: (
     input: CodexSessionRuntimeSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, CodexSessionRuntimeError>;
+  readonly setGoal: (objective: string) => Effect.Effect<void, CodexSessionRuntimeError>;
+  readonly pauseGoal: () => Effect.Effect<void, CodexSessionRuntimeError>;
+  readonly resumeGoal: () => Effect.Effect<void, CodexSessionRuntimeError>;
+  readonly clearGoal: () => Effect.Effect<void, CodexSessionRuntimeError>;
   readonly interruptTurn: (turnId?: TurnId) => Effect.Effect<void, CodexSessionRuntimeError>;
   readonly readThread: Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
   readonly rollbackThread: (
@@ -503,6 +507,8 @@ function readNotificationThreadId(notification: CodexServerNotification): string
     case "thread/unarchived":
     case "thread/closed":
     case "thread/name/updated":
+    case "thread/goal/updated":
+    case "thread/goal/cleared":
     case "thread/tokenUsage/updated":
     case "turn/started":
     case "hook/started":
@@ -747,6 +753,8 @@ const CHILD_CHATTER_METHODS: ReadonlySet<string> = new Set([
   "turn/plan/updated",
   "turn/diff/updated",
   "thread/name/updated",
+  "thread/goal/updated",
+  "thread/goal/cleared",
   "thread/settings/updated",
   "rawResponseItem/completed",
   // Child-owned thread lifecycle: the parent adapter maps these onto the
@@ -1798,6 +1806,38 @@ export const makeCodexSessionRuntime = (
               ? { resumeCursor: { threadId: resumedProviderThreadId } }
               : {}),
           } satisfies ProviderTurnStartResult;
+        }),
+      setGoal: (objective) =>
+        Effect.gen(function* () {
+          const providerThreadId = yield* readProviderThreadId;
+          yield* client.request("thread/goal/set", {
+            threadId: providerThreadId,
+            objective,
+            status: "active",
+          });
+        }),
+      pauseGoal: () =>
+        Effect.gen(function* () {
+          const providerThreadId = yield* readProviderThreadId;
+          yield* client.request("thread/goal/set", {
+            threadId: providerThreadId,
+            status: "paused",
+          });
+        }),
+      resumeGoal: () =>
+        Effect.gen(function* () {
+          const providerThreadId = yield* readProviderThreadId;
+          yield* client.request("thread/goal/set", {
+            threadId: providerThreadId,
+            status: "active",
+          });
+        }),
+      clearGoal: () =>
+        Effect.gen(function* () {
+          const providerThreadId = yield* readProviderThreadId;
+          yield* client.request("thread/goal/clear", {
+            threadId: providerThreadId,
+          });
         }),
       interruptTurn: (turnId) =>
         Effect.gen(function* () {

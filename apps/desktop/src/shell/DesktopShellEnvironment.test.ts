@@ -123,6 +123,7 @@ describe("DesktopShellEnvironment", () => {
 
       assert.equal(commands.length, 1);
       assert.equal(commands[0]?._tag === "StandardCommand" ? commands[0].command : "", "/bin/zsh");
+      assert.equal(commands[0]?._tag === "StandardCommand" ? commands[0].args[0] : "", "-lc");
       assert.equal(env.PATH, "/opt/homebrew/bin:/usr/bin:/Users/test/.local/bin");
       assert.equal(env.SSH_AUTH_SOCK, "/tmp/secretive.sock");
       assert.equal(env.HOMEBREW_PREFIX, "/opt/homebrew");
@@ -158,17 +159,22 @@ describe("DesktopShellEnvironment", () => {
         SHELL: "/bin/zsh",
         PATH: "/usr/bin",
       };
+      const commands: ChildProcess.Command[] = [];
 
       yield* runShellEnvironment({
         env,
         platform: "linux",
-        handler: () =>
-          envOutput({
+        handler: (command) => {
+          commands.push(command);
+          return envOutput({
             PATH: "/home/linuxbrew/.linuxbrew/bin:/usr/bin",
             SSH_AUTH_SOCK: "/tmp/secretive.sock",
-          }),
+          });
+        },
       });
 
+      assert.equal(commands.length, 1);
+      assert.equal(commands[0]?._tag === "StandardCommand" ? commands[0].args[0] : "", "-ilc");
       assert.equal(env.PATH, "/home/linuxbrew/.linuxbrew/bin:/usr/bin");
       assert.equal(env.SSH_AUTH_SOCK, "/tmp/secretive.sock");
     }),

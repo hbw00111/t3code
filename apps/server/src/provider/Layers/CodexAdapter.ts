@@ -1841,6 +1841,39 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     return session;
   });
 
+  const setThreadGoal: NonNullable<CodexAdapterShape["setThreadGoal"]> = (input) => {
+    if (input.operation === "set" && input.objective === undefined) {
+      return Effect.fail(
+        new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "setThreadGoal",
+          issue: "objective is required for set.",
+        }),
+      );
+    }
+
+    const method = input.operation === "clear" ? "thread/goal/clear" : "thread/goal/set";
+    return requireSession(input.threadId).pipe(
+      Effect.flatMap((session) => {
+        switch (input.operation) {
+          case "set":
+            return session.runtime.setGoal(input.objective!);
+          case "pause":
+            return session.runtime.pauseGoal();
+          case "resume":
+            return session.runtime.resumeGoal();
+          case "clear":
+            return session.runtime.clearGoal();
+        }
+      }),
+      Effect.mapError((cause) =>
+        cause._tag === "ProviderAdapterSessionNotFoundError"
+          ? cause
+          : mapCodexRuntimeError(input.threadId, method, cause),
+      ),
+    );
+  };
+
   const interruptTurn: CodexAdapterShape["interruptTurn"] = (threadId, turnId) =>
     requireSession(threadId).pipe(
       Effect.flatMap((session) => session.runtime.interruptTurn(turnId)),
@@ -1974,6 +2007,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     },
     startSession,
     sendTurn,
+    setThreadGoal,
     interruptTurn,
     readThread,
     rollbackThread,

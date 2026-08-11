@@ -1,6 +1,7 @@
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type { DesktopUpdateState } from "@t3tools/contracts";
+import { i18n } from "../i18n";
 
 const testState = vi.hoisted(() => ({
   addToast: vi.fn(),
@@ -117,5 +118,20 @@ describe("showDesktopUpdateDownloadedToast", () => {
         title: "Unable to open release notes",
       });
     });
+  });
+
+  it("uses the selected interface language", () => {
+    showDesktopUpdateDownloadedToast(
+      { openExternal: vi.fn() },
+      downloadedState(),
+      i18n.getFixedT("zh-CN"),
+    );
+
+    expect(testState.addToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "success",
+        title: "更新已下载",
+      }),
+    );
   });
 });

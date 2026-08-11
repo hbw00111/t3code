@@ -7,6 +7,9 @@ import {
   ProviderDriverKind,
   type ProjectId,
   type OrchestrationSession,
+  type ThreadGoalActivityPayload,
+  THREAD_GOAL_UPDATED_ACTIVITY_KIND,
+  THREAD_GOAL_UPDATE_FAILED_ACTIVITY_KIND,
   ThreadId,
   type ProviderSession,
   type RuntimeMode,
@@ -16,9 +19,11 @@ import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shar
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -55,6 +60,7 @@ type ProviderIntentEvent = Extract<
       | "thread.meta-updated"
       | "thread.runtime-mode-set"
       | "thread.turn-start-requested"
+      | "thread.goal-requested"
       | "thread.turn-interrupt-requested"
       | "thread.approval-response-requested"
       | "thread.user-input-response-requested"
@@ -377,6 +383,43 @@ const make = Effect.gen(function* () {
         }),
       ),
     );
+
+  const appendThreadGoalActivity = Effect.fn("appendThreadGoalActivity")(function* (input: {
+    readonly event: Extract<ProviderIntentEvent, { type: "thread.goal-requested" }>;
+    readonly status: "updated" | "failed";
+    readonly detail?: string;
+  }) {
+    const completedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+    const { commandId, eventId } = yield* Effect.all({
+      commandId: serverCommandId("provider-goal-activity"),
+      eventId: serverEventId(),
+    });
+    return yield* orchestrationEngine.dispatch({
+      type: "thread.activity.append",
+      commandId,
+      threadId: input.event.payload.threadId,
+      activity: {
+        id: eventId,
+        tone: input.status === "failed" ? "error" : "info",
+        kind:
+          input.status === "failed"
+            ? THREAD_GOAL_UPDATE_FAILED_ACTIVITY_KIND
+            : THREAD_GOAL_UPDATED_ACTIVITY_KIND,
+        summary: input.status === "failed" ? "Thread goal update failed" : "Thread goal updated",
+        payload: {
+          commandId: input.event.commandId ?? commandId,
+          operation: input.event.payload.operation,
+          ...(input.event.payload.objective !== undefined
+            ? { objective: input.event.payload.objective }
+            : {}),
+          ...(input.detail !== undefined ? { detail: input.detail } : {}),
+        } satisfies ThreadGoalActivityPayload,
+        turnId: null,
+        createdAt: completedAt,
+      },
+      createdAt: completedAt,
+    });
+  });
 
   const formatFailureDetail = (cause: Cause.Cause<unknown>): string => {
     const failReason = cause.reasons.find(Cause.isFailReason);
@@ -1184,6 +1227,32 @@ const make = Effect.gen(function* () {
       .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
   });
 
+  const processThreadGoalRequested = Effect.fn("processThreadGoalRequested")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.goal-requested" }>,
+  ) {
+    const updateExit = yield* Effect.exit(
+      Effect.gen(function* () {
+        yield* ensureSessionForThread(event.payload.threadId, event.payload.createdAt);
+        yield* providerService.setThreadGoal({
+          threadId: event.payload.threadId,
+          operation: event.payload.operation,
+          ...(event.payload.objective !== undefined ? { objective: event.payload.objective } : {}),
+        });
+      }),
+    );
+    if (Exit.isFailure(updateExit)) {
+      if (Cause.hasInterruptsOnly(updateExit.cause)) {
+        return yield* Effect.interrupt;
+      }
+      return yield* appendThreadGoalActivity({
+        event,
+        status: "failed",
+        detail: formatFailureDetail(updateExit.cause),
+      });
+    }
+    yield* appendThreadGoalActivity({ event, status: "updated" });
+  });
+
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-interrupt-requested" }>,
   ) {
@@ -1357,6 +1426,9 @@ const make = Effect.gen(function* () {
       case "thread.turn-start-requested":
         yield* processTurnStartRequested(event);
         return;
+      case "thread.goal-requested":
+        yield* processThreadGoalRequested(event);
+        return;
       case "thread.turn-interrupt-requested":
         yield* processTurnInterruptRequested(event);
         return;
@@ -1404,6 +1476,7 @@ const make = Effect.gen(function* () {
         (event.type === "thread.meta-updated" && event.payload.regenerateTitle === true) ||
         event.type === "thread.runtime-mode-set" ||
         event.type === "thread.turn-start-requested" ||
+        event.type === "thread.goal-requested" ||
         event.type === "thread.turn-interrupt-requested" ||
         event.type === "thread.approval-response-requested" ||
         event.type === "thread.user-input-response-requested" ||

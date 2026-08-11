@@ -7,8 +7,10 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import * as Ref from "effect/Ref";
+import * as Stream from "effect/Stream";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 
@@ -59,6 +61,7 @@ export class DesktopClientSettings extends Context.Service<
     readonly set: (
       settings: ClientSettings,
     ) => Effect.Effect<void, DesktopClientSettingsWriteError>;
+    readonly changes: Stream.Stream<ClientSettings>;
   }
 >()("@t3tools/desktop/settings/DesktopClientSettings") {}
 
@@ -151,6 +154,7 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
+  const changes = yield* PubSub.sliding<ClientSettings>(1);
 
   return DesktopClientSettings.of({
     get: readClientSettings(fileSystem, environment.clientSettingsPath).pipe(
@@ -176,8 +180,11 @@ export const make = Effect.gen(function* () {
             suffix,
           }),
         ),
+        Effect.tap(() => PubSub.publish(changes, settings)),
+        Effect.asVoid,
         Effect.withSpan("desktop.clientSettings.set"),
       ),
+    changes: Stream.fromPubSub(changes),
   });
 });
 
@@ -188,9 +195,15 @@ export const layerTest = (initialSettings: Option.Option<ClientSettings> = Optio
     DesktopClientSettings,
     Effect.gen(function* () {
       const settingsRef = yield* Ref.make(initialSettings);
+      const changes = yield* PubSub.sliding<ClientSettings>(1);
       return DesktopClientSettings.of({
         get: Ref.get(settingsRef),
-        set: (settings) => Ref.set(settingsRef, Option.some(settings)),
+        set: (settings) =>
+          Ref.set(settingsRef, Option.some(settings)).pipe(
+            Effect.andThen(PubSub.publish(changes, settings)),
+            Effect.asVoid,
+          ),
+        changes: Stream.fromPubSub(changes),
       });
     }),
   );

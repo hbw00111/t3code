@@ -271,6 +271,7 @@ const startup = Effect.gen(function* () {
   yield* appIdentity.configure;
   yield* lifecycle.register;
   yield* clerk.configure;
+  yield* applicationMenu.configure;
 
   yield* electronApp.whenReady.pipe(
     Effect.withSpan("desktop.electron.whenReady"),
@@ -284,7 +285,6 @@ const startup = Effect.gen(function* () {
     });
   }
   yield* appIdentity.configure;
-  yield* applicationMenu.configure;
   yield* updates.configure;
   yield* linuxUrlHandler.register;
   yield* bootstrap.pipe(Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)));

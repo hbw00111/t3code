@@ -135,6 +135,10 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     },
   );
 
+  const setThreadGoal = vi.fn(
+    (_input: unknown): Effect.Effect<void, ProviderAdapterError> => Effect.void,
+  );
+
   const interruptTurn = vi.fn(
     (_threadId: ThreadId, _turnId?: TurnId): Effect.Effect<void, ProviderAdapterError> =>
       Effect.void,
@@ -210,6 +214,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     },
     startSession,
     sendTurn,
+    ...(provider === CODEX_DRIVER ? { setThreadGoal } : {}),
     interruptTurn,
     respondToRequest,
     respondToUserInput,
@@ -245,6 +250,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     updateSession,
     startSession,
     sendTurn,
+    setThreadGoal,
     interruptTurn,
     respondToRequest,
     respondToUserInput,
@@ -877,6 +883,21 @@ routing.layer("ProviderServiceLive routing", (it) => {
       });
       assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
 
+      yield* provider.setThreadGoal({
+        threadId: session.threadId,
+        operation: "set",
+        objective: "Finish the migration",
+      });
+      assert.deepEqual(routing.codex.setThreadGoal.mock.calls, [
+        [
+          {
+            threadId: session.threadId,
+            operation: "set",
+            objective: "Finish the migration",
+          },
+        ],
+      ]);
+
       yield* provider.interruptTurn({ threadId: session.threadId });
       assert.deepEqual(routing.codex.interruptTurn.mock.calls, [[session.threadId, undefined]]);
 
@@ -937,6 +958,32 @@ routing.layer("ProviderServiceLive routing", (it) => {
         assert.equal(startPayload.threadId, session.threadId);
       }
       assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
+    }),
+  );
+
+  it.effect("reports unsupported native goals for providers without the capability", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-goal-unsupported");
+      yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make("claudeAgent"),
+        providerInstanceId: claudeAgentInstanceId,
+        threadId,
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
+      });
+
+      const failure = yield* Effect.flip(
+        provider.setThreadGoal({
+          threadId,
+          operation: "pause",
+        }),
+      );
+
+      assert.instanceOf(failure, ProviderUnsupportedError);
+      assert.equal(failure.provider, "claudeAgent");
+      assert.equal(routing.claude.setThreadGoal.mock.calls.length, 0);
+      routing.claude.startSession.mockClear();
     }),
   );
 

@@ -53,6 +53,7 @@ import {
   type ReactNode,
 } from "react";
 import { useAtomValue } from "@effect/atom-react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
@@ -274,13 +275,19 @@ function remoteProjectSourceIcon(source: AddProjectRemoteSource, className: stri
   }
 }
 
-function remoteProjectInputPlaceholder(flow: AddProjectCloneFlow | null): string | null {
+function remoteProjectInputPlaceholder(
+  flow: AddProjectCloneFlow | null,
+  t: TFunction,
+): string | null {
   if (!flow) return null;
   if (flow.step === "confirm") return null;
   if (flow.source === "url") {
-    return "Enter Git clone URL";
+    return t("commandPalette.enterGitCloneUrl");
   }
-  return `Enter ${remoteProjectSourceLabel(flow.source)} repository (${remoteProjectSourcePathHint(flow.source)})`;
+  return t("commandPalette.enterProviderRepository", {
+    provider: remoteProjectSourceLabel(flow.source),
+    path: remoteProjectSourcePathHint(flow.source),
+  });
 }
 
 function sourceProviderKind(source: AddProjectRemoteSource): AddProjectRemoteProviderKind | null {
@@ -307,10 +314,11 @@ type AddProjectRemoteSourceReadiness = Record<
 
 function buildAddProjectRemoteSourceReadiness(
   discovery: SourceControlDiscoveryResult | null,
+  t: TFunction,
 ): AddProjectRemoteSourceReadiness {
   const unavailable = {
     ready: false,
-    hint: "Provider status unavailable. Open Settings -> Source Control and rescan.",
+    hint: t("commandPalette.providerStatusUnavailable"),
   } as const;
   const defaultReadiness: AddProjectRemoteSourceReadiness = {
     url: { ready: true, hint: null },
@@ -346,7 +354,7 @@ function buildAddProjectRemoteSourceReadiness(
         ready: false,
         hint:
           Option.getOrNull(provider.auth.detail) ??
-          `${provider.label} is not authenticated. Open Settings -> Source Control for setup guidance.`,
+          t("commandPalette.providerNotAuthenticated", { provider: provider.label }),
       };
       continue;
     }
@@ -356,11 +364,11 @@ function buildAddProjectRemoteSourceReadiness(
   return readiness;
 }
 
-function errorMessage(error: unknown): string {
+function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
   }
-  return "An error occurred.";
+  return fallback;
 }
 
 const OVERLAY_MODE_BY_COMMAND = {
@@ -1001,6 +1009,7 @@ function OpenCommandPaletteDialog(props: {
       buildThreadActionItems({
         threads,
         ...(activeThreadId ? { activeThreadId } : {}),
+        currentThreadLabel: t("commandPalette.currentThread"),
         projectTitleById,
         sortOrder: clientSettings.sidebarThreadSortOrder,
         icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
@@ -1036,6 +1045,7 @@ function OpenCommandPaletteDialog(props: {
       threadContentMatchByKey,
       threadSearchQuery,
       threads,
+      t,
     ],
   );
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
@@ -1265,8 +1275,10 @@ function OpenCommandPaletteDialog(props: {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Environment unavailable",
-            description: `${environment?.label ?? "The selected environment"} is not connected.`,
+            title: t("commandPalette.environmentUnavailable"),
+            description: t("commandPalette.environmentNotConnected", {
+              environment: environment?.label ?? t("commandPalette.selectedEnvironment"),
+            }),
           }),
         );
         return;
@@ -1279,6 +1291,7 @@ function OpenCommandPaletteDialog(props: {
           environmentId,
           buildAddProjectRemoteSourceReadiness(
             browseEnvironmentId === environmentId ? sourceControlDiscovery.data : null,
+            t,
           ),
         ),
       });
@@ -1289,6 +1302,7 @@ function OpenCommandPaletteDialog(props: {
       environments,
       pushPaletteView,
       sourceControlDiscovery.data,
+      t,
     ],
   );
 
@@ -1342,8 +1356,8 @@ function OpenCommandPaletteDialog(props: {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Unable to browse projects",
-          description: "No environment is available.",
+          title: t("commandPalette.unableBrowseProjects"),
+          description: t("commandPalette.noEnvironmentAvailable"),
         }),
       );
       return;
@@ -1356,6 +1370,7 @@ function OpenCommandPaletteDialog(props: {
     defaultAddProjectEnvironmentId,
     pushPaletteView,
     startAddProjectSourceSelection,
+    t,
   ]);
 
   useLayoutEffect(() => {
@@ -1390,7 +1405,7 @@ function OpenCommandPaletteDialog(props: {
       groups: [
         {
           value: "projects",
-          label: "Projects",
+          label: t("commandPalette.projects"),
           items: enumerateCommandPaletteItems(prioritized),
         },
       ],
@@ -1403,6 +1418,7 @@ function OpenCommandPaletteDialog(props: {
     openIntent,
     projectThreadItems,
     pushPaletteView,
+    t,
   ]);
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
@@ -1450,7 +1466,13 @@ function OpenCommandPaletteDialog(props: {
       title: t("commandPalette.newThread"),
       icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
-      groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
+      groups: [
+        {
+          value: "projects",
+          label: t("commandPalette.projects"),
+          items: projectThreadItems,
+        },
+      ],
     });
   }
 
@@ -1623,7 +1645,12 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  const rootGroups = buildRootGroups({ actionItems, recentThreadItems });
+  const rootGroups = buildRootGroups({
+    actionGroupLabel: t("commandPalette.actions"),
+    actionItems,
+    recentThreadGroupLabel: t("commandPalette.recent"),
+    recentThreadItems,
+  });
   const sourceSelectionViewValue =
     addProjectEnvironmentId === null ? null : `sources:${addProjectEnvironmentId}`;
   const activeGroups =
@@ -1632,7 +1659,7 @@ function OpenCommandPaletteDialog(props: {
     currentView.groups[0]?.value === sourceSelectionViewValue
       ? buildAddProjectSourceGroups(
           addProjectEnvironmentId,
-          buildAddProjectRemoteSourceReadiness(sourceControlDiscovery.data),
+          buildAddProjectRemoteSourceReadiness(sourceControlDiscovery.data, t),
         )
       : (currentView?.groups ?? rootGroups);
 
@@ -1641,7 +1668,9 @@ function OpenCommandPaletteDialog(props: {
     query: deferredQuery,
     isInSubmenu: currentView !== null,
     projectSearchItems: projectSearchItems,
+    projectGroupLabel: t("commandPalette.projects"),
     threadSearchItems: allThreadItems,
+    threadGroupLabel: t("commandPalette.threads"),
   });
 
   const handleAddProjectForEnvironment = useCallback(
@@ -1658,8 +1687,10 @@ function OpenCommandPaletteDialog(props: {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Environment unavailable",
-            description: `${environment?.label ?? "The selected environment"} is not connected.`,
+            title: t("commandPalette.environmentUnavailable"),
+            description: t("commandPalette.environmentNotConnected", {
+              environment: environment?.label ?? t("commandPalette.selectedEnvironment"),
+            }),
           }),
         );
         return;
@@ -1670,8 +1701,8 @@ function OpenCommandPaletteDialog(props: {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Failed to add project",
-            description: "Windows-style paths are only supported on Windows.",
+            title: t("commandPalette.failedAddProject"),
+            description: t("commandPalette.windowsPathsOnly"),
           }),
         );
         return;
@@ -1681,8 +1712,8 @@ function OpenCommandPaletteDialog(props: {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Failed to add project",
-            description: "Relative paths require an active project.",
+            title: t("commandPalette.failedAddProject"),
+            description: t("commandPalette.relativePathNeedsProject"),
           }),
         );
         return;
@@ -1717,8 +1748,9 @@ function OpenCommandPaletteDialog(props: {
             toastManager.add(
               stackedThreadToast({
                 type: "error",
-                title: "Failed to open project",
-                description: error instanceof Error ? error.message : "An error occurred.",
+                title: t("commandPalette.failedOpenProject"),
+                description:
+                  error instanceof Error ? error.message : t("commandPalette.errorOccurred"),
               }),
             );
             return;
@@ -1752,8 +1784,9 @@ function OpenCommandPaletteDialog(props: {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Failed to add project",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              title: t("commandPalette.failedAddProject"),
+              description:
+                error instanceof Error ? error.message : t("commandPalette.errorOccurred"),
             }),
           );
         }
@@ -1768,8 +1801,8 @@ function OpenCommandPaletteDialog(props: {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Failed to add project",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            title: t("commandPalette.failedAddProject"),
+            description: error instanceof Error ? error.message : t("commandPalette.errorOccurred"),
           }),
         );
         return;
@@ -1787,6 +1820,7 @@ function OpenCommandPaletteDialog(props: {
       setOpen,
       clientSettings.sidebarThreadSortOrder,
       threads,
+      t,
     ],
   );
 
@@ -1820,8 +1854,10 @@ function OpenCommandPaletteDialog(props: {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Environment unavailable",
-          description: `${browseEnvironment?.label ?? "The selected environment"} is not connected.`,
+          title: t("commandPalette.environmentUnavailable"),
+          description: t("commandPalette.environmentNotConnected", {
+            environment: browseEnvironment?.label ?? t("commandPalette.selectedEnvironment"),
+          }),
         }),
       );
       return;
@@ -1864,8 +1900,11 @@ function OpenCommandPaletteDialog(props: {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Repository lookup failed",
-              description: errorMessage(squashAtomCommandFailure(lookupResult)),
+              title: t("commandPalette.repositoryLookupFailed"),
+              description: errorMessage(
+                squashAtomCommandFailure(lookupResult),
+                t("commandPalette.errorOccurred"),
+              ),
             }),
           );
         }
@@ -1896,8 +1935,8 @@ function OpenCommandPaletteDialog(props: {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Clone failed",
-          description: "Windows-style paths are only supported on Windows.",
+          title: t("commandPalette.cloneFailed"),
+          description: t("commandPalette.windowsPathsOnly"),
         }),
       );
       return;
@@ -1907,8 +1946,8 @@ function OpenCommandPaletteDialog(props: {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Clone failed",
-          description: "Relative paths require an active project.",
+          title: t("commandPalette.cloneFailed"),
+          description: t("commandPalette.relativePathNeedsProject"),
         }),
       );
       return;
@@ -1936,8 +1975,11 @@ function OpenCommandPaletteDialog(props: {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Clone failed",
-            description: errorMessage(squashAtomCommandFailure(cloneResult)),
+            title: t("commandPalette.cloneFailed"),
+            description: errorMessage(
+              squashAtomCommandFailure(cloneResult),
+              t("commandPalette.errorOccurred"),
+            ),
           }),
         );
       }
@@ -1991,13 +2033,12 @@ function OpenCommandPaletteDialog(props: {
     browseEntries: visibleBrowseEntries,
     browseQuery: query,
     canBrowseUp,
+    groupLabel: t("commandPalette.directories"),
     upIcon: <CornerLeftUpIcon className={ITEM_ICON_CLASS} />,
     directoryIcon: <FolderIcon className={ITEM_ICON_CLASS} />,
     browseUp,
     browseTo,
-  }).map((group) =>
-    group.value === "directories" ? { ...group, label: t("commandPalette.directories") } : group,
-  );
+  });
   const cloneDestinationBrowseGroups = useMemo(
     () =>
       browseGroups.map((group) =>
@@ -2030,12 +2071,17 @@ function OpenCommandPaletteDialog(props: {
   }
 
   const inputPlaceholder =
-    remoteProjectInputPlaceholder(addProjectCloneFlow) ??
+    remoteProjectInputPlaceholder(addProjectCloneFlow, t) ??
     (paletteMode === "root"
       ? t("commandPalette.placeholder")
       : paletteMode === "submenu"
         ? t("common.search")
-        : getCommandPaletteInputPlaceholder(paletteMode));
+        : getCommandPaletteInputPlaceholder(paletteMode, {
+            root: t("commandPalette.placeholder"),
+            "root-browse": t("commandPalette.enterProjectPath"),
+            submenu: t("common.search"),
+            "submenu-browse": t("commandPalette.enterPath"),
+          }));
   const isSubmenu = paletteMode === "submenu" || paletteMode === "submenu-browse";
   const hasHighlightedBrowseItem = highlightedItemValue?.startsWith("browse:") ?? false;
   const canSubmitBrowsePath =
@@ -2173,8 +2219,9 @@ function OpenCommandPaletteDialog(props: {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Unable to run command",
-          description: error instanceof Error ? error.message : "An unexpected error occurred.",
+          title: t("commandPalette.unableRunCommand"),
+          description:
+            error instanceof Error ? error.message : t("commandPalette.unexpectedErrorOccurred"),
         }),
       );
     });
@@ -2262,8 +2309,8 @@ function OpenCommandPaletteDialog(props: {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Could not add WSL project",
-            description: "Start the matching WSL backend, then choose the folder again.",
+            title: t("commandPalette.couldNotAddWslProject"),
+            description: t("commandPalette.startMatchingWslBackend"),
           }),
         );
         return;
@@ -2289,6 +2336,7 @@ function OpenCommandPaletteDialog(props: {
     handleAddProjectForEnvironment,
     isPickingProjectFolder,
     primaryEnvironmentId,
+    t,
   ]);
 
   const inputAccessory =

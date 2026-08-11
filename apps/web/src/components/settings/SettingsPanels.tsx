@@ -1800,13 +1800,16 @@ export function GeneralSettingsPanel() {
   );
   const observability = useAtomValue(primaryServerObservabilityAtom);
   const serverProviders = useAtomValue(primaryServerProvidersAtom);
-  const diagnosticsDescription = formatDiagnosticsDescription({
-    localTracingEnabled: observability?.localTracingEnabled ?? false,
-    otlpTracesEnabled: observability?.otlpTracesEnabled ?? false,
-    otlpTracesUrl: observability?.otlpTracesUrl,
-    otlpMetricsEnabled: observability?.otlpMetricsEnabled ?? false,
-    otlpMetricsUrl: observability?.otlpMetricsUrl,
-  });
+  const diagnosticsDescription = formatDiagnosticsDescription(
+    {
+      localTracingEnabled: observability?.localTracingEnabled ?? false,
+      otlpTracesEnabled: observability?.otlpTracesEnabled ?? false,
+      otlpTracesUrl: observability?.otlpTracesUrl,
+      otlpMetricsEnabled: observability?.otlpMetricsEnabled ?? false,
+      otlpMetricsUrl: observability?.otlpMetricsUrl,
+    },
+    t,
+  );
 
   const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
   const textGenInstanceId = textGenerationModelSelection.instanceId;

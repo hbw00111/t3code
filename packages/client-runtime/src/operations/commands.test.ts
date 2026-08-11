@@ -23,8 +23,12 @@ import * as RpcSession from "../rpc/session.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import {
   archiveThread,
+  clearThreadGoal,
   createProject,
+  pauseThreadGoal,
+  resumeThreadGoal,
   settleThread,
+  setThreadGoal,
   stopThreadSession,
   unsettleThread,
 } from "./commands.ts";
@@ -168,6 +172,43 @@ describe("environment commands", () => {
           threadId: "thread-1",
           reason: "user",
         },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("dispatches native thread goal commands", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+      const threadId = ThreadId.make("thread-goal");
+      const commandId = CommandId.make("goal-command");
+      const createdAt = "2026-06-06T00:02:00.000Z";
+      const provideSupervisor = Effect.provideService(
+        EnvironmentSupervisor.EnvironmentSupervisor,
+        supervisor,
+      );
+
+      yield* setThreadGoal({
+        commandId,
+        threadId,
+        objective: "Finish the migration",
+        createdAt,
+      }).pipe(provideSupervisor);
+      yield* pauseThreadGoal({ commandId, threadId, createdAt }).pipe(provideSupervisor);
+      yield* resumeThreadGoal({ commandId, threadId, createdAt }).pipe(provideSupervisor);
+      yield* clearThreadGoal({ commandId, threadId, createdAt }).pipe(provideSupervisor);
+
+      expect(dispatched).toEqual([
+        {
+          type: "thread.goal.set",
+          commandId,
+          threadId,
+          objective: "Finish the migration",
+          createdAt,
+        },
+        { type: "thread.goal.pause", commandId, threadId, createdAt },
+        { type: "thread.goal.resume", commandId, threadId, createdAt },
+        { type: "thread.goal.clear", commandId, threadId, createdAt },
       ]);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
   );

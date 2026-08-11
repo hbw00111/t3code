@@ -1,6 +1,8 @@
 import type { DesktopBridge, DesktopUpdateState } from "@t3tools/contracts";
 import { ArrowRightIcon } from "lucide-react";
+import type { TFunction } from "i18next";
 
+import { i18n } from "../i18n";
 import {
   getDesktopUpdateDownloadedVersion,
   getDesktopUpdateReleaseUrl,
@@ -12,9 +14,11 @@ type DesktopUpdateShell = Pick<DesktopBridge, "openExternal">;
 function ReleaseNotesLink({
   shell,
   releaseUrl,
+  t,
 }: {
   shell: DesktopUpdateShell;
   releaseUrl: string;
+  t: TFunction;
 }) {
   return (
     <button
@@ -26,12 +30,15 @@ function ReleaseNotesLink({
           } catch {
             // Surface rejected IPC calls through the same user-visible fallback.
           }
-          toastManager.add({ type: "error", title: "Unable to open release notes" });
+          toastManager.add({
+            type: "error",
+            title: t("desktopUpdate.unableToOpenReleaseNotes"),
+          });
         })();
       }}
       type="button"
     >
-      Read more
+      {t("desktopUpdate.readMore")}
       <ArrowRightIcon aria-hidden className="size-3 -rotate-45" strokeWidth={2.25} />
     </button>
   );
@@ -40,15 +47,16 @@ function ReleaseNotesLink({
 export function showDesktopUpdateDownloadedToast(
   shell: DesktopUpdateShell,
   state: DesktopUpdateState,
+  t: TFunction = i18n.t.bind(i18n),
 ): void {
   const releaseUrl = getDesktopUpdateReleaseUrl(getDesktopUpdateDownloadedVersion(state));
   toastManager.add({
     type: "success",
-    title: "Update downloaded",
+    title: t("desktopUpdate.downloadedTitle"),
     description: (
       <>
-        Restart the app from the update button to install it.
-        {releaseUrl ? <ReleaseNotesLink releaseUrl={releaseUrl} shell={shell} /> : null}
+        {t("desktopUpdate.downloadedDescription")}
+        {releaseUrl ? <ReleaseNotesLink releaseUrl={releaseUrl} shell={shell} t={t} /> : null}
       </>
     ),
   });

@@ -829,6 +829,53 @@ export const ThreadTurnStartCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+export const ThreadGoalOperation = Schema.Literals(["set", "pause", "resume", "clear"]);
+export type ThreadGoalOperation = typeof ThreadGoalOperation.Type;
+
+export const THREAD_GOAL_UPDATED_ACTIVITY_KIND = "provider.thread.goal.updated";
+export const THREAD_GOAL_UPDATE_FAILED_ACTIVITY_KIND = "provider.thread.goal.update.failed";
+
+export const ThreadGoalActivityPayload = Schema.Struct({
+  commandId: CommandId,
+  operation: ThreadGoalOperation,
+  objective: Schema.optional(TrimmedNonEmptyString),
+  detail: Schema.optional(TrimmedNonEmptyString),
+});
+export type ThreadGoalActivityPayload = typeof ThreadGoalActivityPayload.Type;
+
+export const ThreadGoalSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  objective: TrimmedNonEmptyString,
+  // A goal can be the first provider operation for a newly-created thread.
+  // Reuse the turn bootstrap so creation, worktree setup, and project setup
+  // complete before the provider receives the native goal request.
+  bootstrap: Schema.optional(ThreadTurnStartBootstrap),
+  createdAt: IsoDateTime,
+});
+
+export const ThreadGoalPauseCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.pause"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
+export const ThreadGoalResumeCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.resume"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
+export const ThreadGoalClearCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.clear"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
 const ClientThreadTurnStartCommand = Schema.Struct({
   type: Schema.Literal("thread.turn.start"),
   commandId: CommandId,
@@ -914,6 +961,10 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ThreadTurnStartCommand,
+  ThreadGoalSetCommand,
+  ThreadGoalPauseCommand,
+  ThreadGoalResumeCommand,
+  ThreadGoalClearCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
@@ -942,6 +993,10 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ClientThreadTurnStartCommand,
+  ThreadGoalSetCommand,
+  ThreadGoalPauseCommand,
+  ThreadGoalResumeCommand,
+  ThreadGoalClearCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
@@ -1061,6 +1116,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.interaction-mode-set",
   "thread.message-sent",
   "thread.turn-start-requested",
+  "thread.goal-requested",
   "thread.turn-interrupt-requested",
   "thread.approval-response-requested",
   "thread.user-input-response-requested",
@@ -1243,6 +1299,13 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+export const ThreadGoalRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  operation: ThreadGoalOperation,
+  objective: Schema.optional(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+
 export const ThreadTurnInterruptRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   turnId: Schema.optional(TurnId),
@@ -1421,6 +1484,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.turn-start-requested"),
     payload: ThreadTurnStartRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.goal-requested"),
+    payload: ThreadGoalRequestedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

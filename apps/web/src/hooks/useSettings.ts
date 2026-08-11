@@ -45,8 +45,10 @@ type UnifiedSettingsPatch = ServerSettingsPatch & ClientSettingsPatch;
 const clientSettingsListeners = new Set<() => void>();
 const clientSettingsHydrationListeners = new Set<() => void>();
 let clientSettingsSnapshot = DEFAULT_CLIENT_SETTINGS;
+let lastPersistedClientSettingsSnapshot = DEFAULT_CLIENT_SETTINGS;
 let clientSettingsHydrated = false;
 let clientSettingsHydrationPromise: Promise<void> | null = null;
+let clientSettingsPersistenceQueue: Promise<void> = Promise.resolve();
 let clientSettingsHydrationGeneration = 0;
 
 function emitClientSettingsChange() {
@@ -114,7 +116,9 @@ async function hydrateClientSettings(): Promise<void> {
         return;
       }
       if (persistedSettings) {
-        replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...persistedSettings });
+        const hydratedSettings = { ...DEFAULT_CLIENT_SETTINGS, ...persistedSettings };
+        lastPersistedClientSettingsSnapshot = hydratedSettings;
+        replaceClientSettingsSnapshot(hydratedSettings);
       }
     } catch (error) {
       console.error(`${CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE} hydrate failed`, {
@@ -139,15 +143,28 @@ async function hydrateClientSettings(): Promise<void> {
 }
 
 function persistClientSettings(settings: ClientSettings): void {
+  const persistenceGeneration = clientSettingsHydrationGeneration;
   replaceClientSettingsSnapshot(settings);
-  void ensureLocalApi()
-    .persistence.setClientSettings(settings)
-    .catch((error) => {
+
+  clientSettingsPersistenceQueue = clientSettingsPersistenceQueue.then(async () => {
+    try {
+      await ensureLocalApi().persistence.setClientSettings(settings);
+      if (persistenceGeneration === clientSettingsHydrationGeneration) {
+        lastPersistedClientSettingsSnapshot = settings;
+      }
+    } catch (error) {
       console.error(`${CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE} persist failed`, {
         operation: "persist",
         ...safeErrorLogAttributes(error),
       });
-    });
+      if (
+        persistenceGeneration === clientSettingsHydrationGeneration &&
+        clientSettingsSnapshot === settings
+      ) {
+        replaceClientSettingsSnapshot(lastPersistedClientSettingsSnapshot);
+      }
+    }
+  });
 }
 
 // ── Key sets for routing patches ─────────────────────────────────────
@@ -350,8 +367,10 @@ export function useUpdateClientSettings() {
 export function __resetClientSettingsPersistenceForTests(): void {
   clientSettingsHydrationGeneration += 1;
   clientSettingsSnapshot = DEFAULT_CLIENT_SETTINGS;
+  lastPersistedClientSettingsSnapshot = DEFAULT_CLIENT_SETTINGS;
   clientSettingsHydrated = false;
   clientSettingsHydrationPromise = null;
+  clientSettingsPersistenceQueue = Promise.resolve();
   clientSettingsListeners.clear();
   clientSettingsHydrationListeners.clear();
 }
@@ -359,6 +378,12 @@ export function __resetClientSettingsPersistenceForTests(): void {
 export function __setClientSettingsForTests(settings: ClientSettings): void {
   clientSettingsHydrationGeneration += 1;
   clientSettingsSnapshot = settings;
+  lastPersistedClientSettingsSnapshot = settings;
   clientSettingsHydrated = true;
   clientSettingsHydrationPromise = null;
+}
+
+export function __persistClientSettingsForTests(settings: ClientSettings): Promise<void> {
+  persistClientSettings(settings);
+  return clientSettingsPersistenceQueue;
 }

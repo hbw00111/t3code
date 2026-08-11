@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { i18n } from "./i18n/i18n";
 
 import {
   formatElapsedDurationLabel,
@@ -12,6 +13,10 @@ import {
   getRelativeTimeState,
   getTimestampFormatOptions,
 } from "./timestampFormat";
+
+afterEach(async () => {
+  await i18n.changeLanguage("en");
+});
 
 describe("getTimestampFormatOptions", () => {
   it("omits hour12 when locale formatting is requested", () => {
@@ -170,5 +175,24 @@ describe("formatElapsedDurationLabel", () => {
     expect(formatElapsedDurationLabel("2026-04-07T11:45:00.000Z")).toBe("15m");
     expect(formatElapsedDurationLabel("2026-04-07T06:00:00.000Z")).toBe("6h");
     expect(formatElapsedDurationLabel("2026-04-03T12:00:00.000Z")).toBe("4d");
+  });
+});
+
+describe("localized timestamp labels", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-07T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("switches fixed relative and expiry text with the active UI language", async () => {
+    await i18n.changeLanguage("zh-CN");
+
+    expect(formatRelativeTimeLabel("2026-04-07T11:45:00.000Z")).toBe("15分钟前");
+    expect(formatRelativeTimeUntilLabel("2026-04-07T12:00:45.000Z")).toBe("剩余 45秒");
+    expect(formatExpiresInLabel("2026-04-07T12:04:12.000Z")).toBe("4分钟 12秒后过期");
   });
 });

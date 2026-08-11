@@ -7,6 +7,7 @@ import {
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
+import { i18n } from "../i18n";
 
 import {
   buildLocalEnvironmentUpdateGroups,
@@ -301,6 +302,76 @@ describe("provider update launch notification logic", () => {
     });
 
     expect(view.description).toBe("Codex and Cursor can be updated from provider settings.");
+  });
+
+  it("localizes provider availability, progress, errors, and sidebar status", () => {
+    const zhT = i18n.getFixedT("zh-CN");
+    const candidate = updateCandidate({ driver: driver("codex"), latestVersion: "1.1.0" });
+    const initialView = getProviderUpdateInitialToastView(
+      { updateProviders: [candidate], oneClickProviders: [candidate] },
+      zhT,
+    );
+    expect(initialView).toMatchObject({
+      title: "有可用更新：Codex v1.1.0",
+      description: "立即安装更新，或前往模型服务设置查看。",
+    });
+
+    expect(getProviderUpdateRejectedToastView(2, "WebSocket closed", zhT)).toMatchObject({
+      title: "多个模型服务更新失败",
+      description: "WebSocket closed",
+    });
+
+    const sidebarView = getProviderUpdateSidebarPillView(
+      [
+        provider({
+          driver: driver("codex"),
+          updateState: {
+            status: "running",
+            startedAt: checkedAt,
+            finishedAt: null,
+            message: "Updating provider.",
+            output: null,
+          },
+        }),
+        provider({
+          driver: driver("cursor"),
+          updateState: {
+            status: "queued",
+            startedAt: null,
+            finishedAt: null,
+            message: "Waiting for another provider update to finish.",
+            output: null,
+          },
+        }),
+      ],
+      undefined,
+      zhT,
+    );
+    expect(sidebarView).toMatchObject({
+      title: "正在更新 2 个模型服务",
+      description: "Codex 和 Cursor 正在更新。",
+    });
+
+    const failedView = getProviderUpdateSidebarPillView(
+      [
+        provider({
+          driver: driver("claudeAgent"),
+          updateState: {
+            status: "failed",
+            startedAt: checkedAt,
+            finishedAt: checkedAt,
+            message: "Update command exited with code 1.",
+            output: null,
+          },
+        }),
+      ],
+      { visibleAfterIso: sessionStartedAt },
+      zhT,
+    );
+    expect(failedView).toMatchObject({
+      title: "Claude v1.1.0 更新失败",
+      description: "更新命令退出，代码为 1。",
+    });
   });
 
   it("uses server update state for running progress", () => {

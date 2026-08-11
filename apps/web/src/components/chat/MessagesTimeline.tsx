@@ -31,6 +31,7 @@ import {
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { FileDiff } from "@pierre/diffs/react";
+import { useTranslation } from "react-i18next";
 import {
   deriveTimelineEntries,
   workEntryIndicatesToolFailure,
@@ -130,6 +131,7 @@ import {
 
 interface TimelineRowSharedState {
   timestampFormat: TimestampFormat;
+  uiLanguage: string;
   routeThreadKey: string;
   threadRef: ScopedThreadRef | null;
   markdownCwd: string | undefined;
@@ -281,6 +283,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   topFadeEnabled = false,
   loadEarlier = null,
 }: MessagesTimelineProps) {
+  const { i18n } = useTranslation();
+  const uiLanguage = i18n.resolvedLanguage ?? i18n.language;
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const [expandedWorkGroupIds, setExpandedWorkGroupIds] = useState<ReadonlySet<string>>(new Set());
   const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false);
@@ -503,6 +507,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
       timestampFormat,
+      uiLanguage,
       routeThreadKey,
       threadRef: parseScopedThreadKey(routeThreadKey),
       markdownCwd,
@@ -520,6 +525,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     }),
     [
       timestampFormat,
+      uiLanguage,
       routeThreadKey,
       markdownCwd,
       resolvedTheme,

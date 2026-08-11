@@ -160,7 +160,9 @@ describe("buildThreadActionItems", () => {
       query: "设置",
       isInSubmenu: false,
       projectSearchItems: [],
+      projectGroupLabel: "项目",
       threadSearchItems: [],
+      threadGroupLabel: "任务",
     });
 
     expect(groups[0]?.items.map((item) => item.value)).toEqual(["action:settings"]);
@@ -185,6 +187,7 @@ describe("buildThreadActionItems", () => {
             updatedAt: "2026-03-20T00:00:00.000Z",
           }),
         ],
+        currentThreadLabel: "Current thread",
         projectTitleById: new Map([[PROJECT_ID, "Project"]]),
         sortOrder: "updated_at",
         icon: null,
@@ -217,6 +220,7 @@ describe("buildThreadActionItems", () => {
           updatedAt: "2026-03-19T00:00:00.000Z",
         }),
       ],
+      currentThreadLabel: "Current thread",
       projectTitleById: new Map([[PROJECT_ID, "Project"]]),
       sortOrder: "updated_at",
       icon: null,
@@ -228,7 +232,9 @@ describe("buildThreadActionItems", () => {
       query: "project",
       isInSubmenu: false,
       projectSearchItems: [],
+      projectGroupLabel: "Projects",
       threadSearchItems: threadItems,
+      threadGroupLabel: "Threads",
     });
 
     expect(groups).toHaveLength(1);
@@ -261,7 +267,9 @@ describe("buildThreadActionItems", () => {
       query: "project",
       isInSubmenu: false,
       projectSearchItems: [],
+      projectGroupLabel: "Projects",
       threadSearchItems: [],
+      threadGroupLabel: "Threads",
     });
 
     expect(groups).toHaveLength(1);
@@ -271,6 +279,7 @@ describe("buildThreadActionItems", () => {
   it("keeps message excerpts searchable without replacing thread metadata", () => {
     const [item] = buildThreadActionItems({
       threads: [makeThread({ branch: "feat/search" })],
+      currentThreadLabel: "Current thread",
       projectTitleById: new Map([[PROJECT_ID, "T3 Code"]]),
       sortOrder: "updated_at",
       icon: null,
@@ -307,6 +316,7 @@ describe("buildThreadActionItems", () => {
           updatedAt: "2026-03-20T00:00:00.000Z",
         }),
       ],
+      currentThreadLabel: "Current thread",
       projectTitleById: new Map([[PROJECT_ID, "Project"]]),
       sortOrder: "updated_at",
       icon: null,
@@ -330,6 +340,7 @@ describe("buildBrowseGroups", () => {
       browseEntries: [{ name: "Downloads", fullPath: "/Users/test/Downloads" }],
       browseQuery: "~/",
       canBrowseUp: false,
+      groupLabel: "Directories",
       upIcon: null,
       directoryIcon: null,
       browseUp: vi.fn(),

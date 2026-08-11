@@ -102,22 +102,34 @@ export function buildMultiSelectThreadContextMenuItems(input: {
 export function buildBulkTitleRegenerationContextMenuItem(input: {
   supportedCount: number;
   actionableCount: number;
+  regenerateLabel: string;
+  regeneratingLabel: string;
 }): ContextMenuItem<"regenerate-title"> | null {
   if (input.supportedCount === 0) return null;
   if (input.actionableCount === 0) {
     return {
       id: "regenerate-title",
-      label: `Regenerating… (${input.supportedCount})`,
+      label: input.regeneratingLabel,
       disabled: true,
     };
   }
   return {
     id: "regenerate-title",
-    label: `Regenerate titles (${input.actionableCount})`,
+    label: input.regenerateLabel,
   };
 }
 
+export type ThreadStatusKind =
+  | "working"
+  | "monitoring"
+  | "connecting"
+  | "completed"
+  | "pending-approval"
+  | "awaiting-input"
+  | "plan-ready";
+
 export interface ThreadStatusPill {
+  kind: ThreadStatusKind;
   label:
     | "Working"
     | "Monitoring"
@@ -134,14 +146,14 @@ export interface ThreadStatusPill {
 // Rollup order mirrors the per-thread resolver exactly: attention states,
 // then active work, then the actionable plan prompt, then passive
 // monitoring. A Monitoring sibling must never hide a Plan Ready thread.
-const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
-  "Pending Approval": 6,
-  "Awaiting Input": 5,
-  Working: 4,
-  Connecting: 4,
-  "Plan Ready": 3,
-  Monitoring: 2,
-  Completed: 1,
+const THREAD_STATUS_PRIORITY: Record<ThreadStatusKind, number> = {
+  "pending-approval": 6,
+  "awaiting-input": 5,
+  working: 4,
+  connecting: 4,
+  "plan-ready": 3,
+  monitoring: 2,
+  completed: 1,
 };
 
 type ThreadStatusInput = Pick<
@@ -613,6 +625,7 @@ export function resolveThreadStatusPill(input: {
 
   if (thread.hasPendingApprovals) {
     return {
+      kind: "pending-approval",
       label: "Pending Approval",
       colorClass: "text-amber-600 dark:text-amber-300/90",
       dotClass: "bg-amber-500 dark:bg-amber-300/90",
@@ -622,6 +635,7 @@ export function resolveThreadStatusPill(input: {
 
   if (thread.hasPendingUserInput) {
     return {
+      kind: "awaiting-input",
       label: "Awaiting Input",
       colorClass: "text-indigo-600 dark:text-indigo-300/90",
       dotClass: "bg-indigo-500 dark:bg-indigo-300/90",
@@ -631,6 +645,7 @@ export function resolveThreadStatusPill(input: {
 
   if (thread.session?.status === "running") {
     return {
+      kind: "working",
       label: "Working",
       colorClass: "text-sky-600 dark:text-sky-300/80",
       dotClass: "bg-sky-500 dark:bg-sky-300/80",
@@ -640,6 +655,7 @@ export function resolveThreadStatusPill(input: {
 
   if (thread.session?.status === "starting") {
     return {
+      kind: "connecting",
       label: "Connecting",
       colorClass: "text-sky-600 dark:text-sky-300/80",
       dotClass: "bg-sky-500 dark:bg-sky-300/80",
@@ -656,6 +672,7 @@ export function resolveThreadStatusPill(input: {
     thread.hasActionableProposedPlan;
   if (hasPlanReadyPrompt) {
     return {
+      kind: "plan-ready",
       label: "Plan Ready",
       colorClass: "text-violet-600 dark:text-violet-300/90",
       dotClass: "bg-violet-500 dark:bg-violet-300/90",
@@ -669,6 +686,7 @@ export function resolveThreadStatusPill(input: {
   // live work. Same recede treatment as Working per inbox-zero.
   if (thread.backgroundLiveness === "working") {
     return {
+      kind: "working",
       label: "Working",
       colorClass: "text-sky-600 dark:text-sky-300/80",
       dotClass: "bg-sky-500 dark:bg-sky-300/80",
@@ -678,6 +696,7 @@ export function resolveThreadStatusPill(input: {
 
   if (thread.backgroundLiveness === "monitoring") {
     return {
+      kind: "monitoring",
       label: "Monitoring",
       colorClass: "text-sky-600 dark:text-sky-300/80",
       dotClass: "bg-sky-500 dark:bg-sky-300/80",
@@ -687,6 +706,7 @@ export function resolveThreadStatusPill(input: {
 
   if (hasUnseenCompletion(thread)) {
     return {
+      kind: "completed",
       label: "Completed",
       colorClass: "text-emerald-600 dark:text-emerald-300/90",
       dotClass: "bg-emerald-500 dark:bg-emerald-300/90",
@@ -706,7 +726,7 @@ export function resolveProjectStatusIndicator(
     if (status === null) continue;
     if (
       highestPriorityStatus === null ||
-      THREAD_STATUS_PRIORITY[status.label] > THREAD_STATUS_PRIORITY[highestPriorityStatus.label]
+      THREAD_STATUS_PRIORITY[status.kind] > THREAD_STATUS_PRIORITY[highestPriorityStatus.kind]
     ) {
       highestPriorityStatus = status;
     }

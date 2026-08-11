@@ -60,6 +60,7 @@ import {
   useState,
 } from "react";
 import { flushSync } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -76,6 +77,7 @@ import { readLocalApi } from "../localApi";
 import { useDiffPanelStore } from "../diffPanelStore";
 import {
   collapseExpandedComposerCursor,
+  parseComposerGoalCommand,
   parseStandaloneComposerSlashCommand,
 } from "../composer-logic";
 import {
@@ -213,6 +215,10 @@ import {
 import { appendPreviewAnnotationPrompt } from "../lib/previewAnnotation";
 import { appendReviewCommentsToPrompt, type ReviewCommentContext } from "../reviewCommentContext";
 import { environmentCatalog } from "../connection/catalog";
+import {
+  providerSupportsThreadGoals,
+  threadGoalActivityTranslationKey,
+} from "../threadGoalActivity";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { projectEnvironment } from "../state/projects";
@@ -1168,6 +1174,7 @@ function chatActionErrorMessage(error: unknown): string {
 }
 
 function ChatViewContent(props: ChatViewProps) {
+  const { t } = useTranslation();
   const {
     environmentId,
     threadId,
@@ -1204,6 +1211,10 @@ function ChatViewContent(props: ChatViewProps) {
   const setThreadInteractionMode = useAtomCommand(threadEnvironment.setInteractionMode, {
     reportFailure: false,
   });
+  const setThreadGoal = useAtomCommand(threadEnvironment.setGoal, { reportFailure: false });
+  const pauseThreadGoal = useAtomCommand(threadEnvironment.pauseGoal, { reportFailure: false });
+  const resumeThreadGoal = useAtomCommand(threadEnvironment.resumeGoal, { reportFailure: false });
+  const clearThreadGoal = useAtomCommand(threadEnvironment.clearGoal, { reportFailure: false });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
     reportFailure: false,
@@ -1491,13 +1502,10 @@ function ChatViewContent(props: ChatViewProps) {
     ? (localServerError ?? activeServerThread?.session?.lastError ?? null)
     : localDraftError;
   const runtimeMode = composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
-  // Plan mode is legacy (Settings → Beta). With the flag off the effective
-  // mode is forced to "default" — even for threads with a stored plan mode —
-  // so nobody is trapped in plan mode while its toggle is hidden. The next
-  // send persists "default" back to the thread.
-  const interactionMode = settings.planModeEnabled
-    ? (composerInteractionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE)
-    : DEFAULT_INTERACTION_MODE;
+  // The visible toggle stays behind Settings → Beta, while slash commands can
+  // still select either mode and always reflect the thread's persisted state.
+  const interactionMode =
+    composerInteractionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
   const activeThreadId = activeThread?.id ?? null;
@@ -2136,7 +2144,16 @@ function ChatViewContent(props: ChatViewProps) {
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
-  const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
+  const workLogEntries = useMemo(
+    () =>
+      deriveWorkLogEntries(
+        threadActivities.map((activity) => {
+          const translationKey = threadGoalActivityTranslationKey(activity);
+          return translationKey ? { ...activity, summary: t(translationKey) } : activity;
+        }),
+      ),
+    [t, threadActivities],
+  );
   const turnPlans = useMemo(() => deriveTurnPlans(threadActivities), [threadActivities]);
   // Native subagent fold: memoized by activity-list identity, shared by the
   // Agents surface, live strip, and workflow cards. v2Projection is null
@@ -4881,6 +4898,169 @@ function ChatViewContent(props: ChatViewProps) {
         composerPreviewAnnotations.length +
         composerReviewComments.length,
     });
+    const goalCommand =
+      !directAnnotation &&
+      composerImages.length === 0 &&
+      sendableComposerTerminalContexts.length === 0 &&
+      composerElementContexts.length === 0 &&
+      composerPreviewAnnotations.length === 0 &&
+      composerReviewComments.length === 0
+        ? parseComposerGoalCommand(trimmed)
+        : null;
+    if (goalCommand) {
+      if (goalCommand.action === "missing-objective") {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: t("chat.goalObjectiveRequired"),
+            description: t("chat.goalObjectiveRequiredDescription"),
+          }),
+        );
+        return;
+      }
+      if (!activeProject) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: t("chat.chooseProject"),
+            description: t("chat.goalNeedsProject"),
+          }),
+        );
+        return;
+      }
+      if (!providerSupportsThreadGoals(ctxSelectedProvider)) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: t("chat.goalRequiresCodex"),
+            description: t("chat.goalRequiresCodexDescription"),
+          }),
+        );
+        return;
+      }
+      if (goalCommand.action !== "set" && !isServerThread) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: t("chat.goalNotStarted"),
+            description: t("chat.goalNotStartedDescription"),
+          }),
+        );
+        return;
+      }
+
+      const threadIdForGoal = activeThread.id;
+      const isFirstOperation = !isServerThread || activeThread.messages.length === 0;
+      const baseBranchForGoalWorktree =
+        goalCommand.action === "set" &&
+        isFirstOperation &&
+        sendEnvMode === "worktree" &&
+        !activeThread.worktreePath
+          ? activeThreadBranch
+          : null;
+      if (
+        goalCommand.action === "set" &&
+        isFirstOperation &&
+        sendEnvMode === "worktree" &&
+        !activeThread.worktreePath &&
+        !activeThreadBranch
+      ) {
+        setThreadError(threadIdForGoal, t("chat.selectBaseBranchBeforeGoalInWorktreeMode"));
+        return;
+      }
+      if (interactionMode === "plan") {
+        handleInteractionModeChange("default");
+      }
+
+      const createdAt = new Date().toISOString();
+      const shouldTrackBootstrap =
+        goalCommand.action === "set" && (isLocalDraftThread || baseBranchForGoalWorktree !== null);
+      sendInFlightRef.current = true;
+      if (shouldTrackBootstrap) {
+        beginLocalDispatch({ preparingWorktree: baseBranchForGoalWorktree !== null });
+      }
+      setThreadError(threadIdForGoal, null);
+
+      const goalResult =
+        goalCommand.action === "set"
+          ? await setThreadGoal({
+              environmentId,
+              input: {
+                threadId: threadIdForGoal,
+                objective: goalCommand.objective,
+                ...((isLocalDraftThread || baseBranchForGoalWorktree) && {
+                  bootstrap: {
+                    ...(isLocalDraftThread
+                      ? {
+                          createThread: {
+                            projectId: activeProject.id,
+                            title: truncate(goalCommand.objective),
+                            modelSelection: createModelSelection(
+                              ctxSelectedModelSelection.instanceId,
+                              ctxSelectedModel ||
+                                activeProject.defaultModelSelection?.model ||
+                                DEFAULT_MODEL,
+                              ctxSelectedModelSelection.options,
+                            ),
+                            runtimeMode,
+                            interactionMode: "default",
+                            branch: activeThreadBranch,
+                            worktreePath: activeThread.worktreePath,
+                            createdAt,
+                          },
+                        }
+                      : {}),
+                    ...(baseBranchForGoalWorktree
+                      ? {
+                          prepareWorktree: {
+                            projectCwd: activeProject.workspaceRoot,
+                            baseBranch: baseBranchForGoalWorktree,
+                            branch: buildTemporaryWorktreeBranchName(randomHex),
+                            ...(startFromOrigin ? { startFromOrigin: true } : {}),
+                          },
+                          runSetupScript: true,
+                        }
+                      : {}),
+                  },
+                }),
+              },
+            })
+          : goalCommand.action === "pause"
+            ? await pauseThreadGoal({
+                environmentId,
+                input: { threadId: threadIdForGoal },
+              })
+            : goalCommand.action === "resume"
+              ? await resumeThreadGoal({
+                  environmentId,
+                  input: { threadId: threadIdForGoal },
+                })
+              : await clearThreadGoal({
+                  environmentId,
+                  input: { threadId: threadIdForGoal },
+                });
+
+      sendInFlightRef.current = false;
+      if (goalResult._tag === "Failure") {
+        if (shouldTrackBootstrap) {
+          resetLocalDispatch();
+        }
+        if (!isAtomCommandInterrupted(goalResult)) {
+          const error = squashAtomCommandFailure(goalResult);
+          setThreadError(
+            threadIdForGoal,
+            error instanceof Error ? error.message : t("chat.goalCommandFailed"),
+          );
+        }
+        return;
+      }
+
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+      acknowledgeActiveThreadWoke();
+      return;
+    }
     if (!directAnnotation && showPlanFollowUpPrompt && activeProposedPlan) {
       const followUp = resolvePlanFollowUpSubmission({
         draftText: trimmed,
@@ -4895,10 +5075,7 @@ function ChatViewContent(props: ChatViewProps) {
       });
       return;
     }
-    // Legacy plan mode: /plan and /default only act when the beta flag is on;
-    // otherwise they send as plain text like any other message.
     const standaloneSlashCommand =
-      settings.planModeEnabled &&
       composerImages.length === 0 &&
       sendableComposerTerminalContexts.length === 0 &&
       composerElementContexts.length === 0 &&

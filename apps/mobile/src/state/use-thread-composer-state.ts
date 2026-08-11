@@ -11,6 +11,10 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import { deriveActiveWorkStartedAt } from "@t3tools/shared/orchestrationTiming";
 
 import { makeQueuedMessageMetadata } from "../lib/commandMetadata";
@@ -22,6 +26,11 @@ import {
 import type { DraftComposerImageAttachment } from "../lib/composerImages";
 import { scopedThreadKey } from "../lib/scopedEntities";
 import { buildThreadFeed } from "../lib/threadActivity";
+import {
+  dispatchThreadGoalCommand,
+  providerSupportsThreadGoals,
+  resolveThreadComposerSubmission,
+} from "../lib/threadGoalCommands";
 import { appAtomRegistry } from "../state/atom-registry";
 import {
   appendComposerDraftAttachments,
@@ -37,10 +46,13 @@ import {
   useComposerDraft,
 } from "./use-composer-drafts";
 import { setPendingConnectionError } from "../state/use-remote-environment-registry";
+import { useAtomCommand } from "./use-atom-command";
+import { useEnvironmentServerConfig } from "./entities";
 import { useSelectedThreadDetail } from "../state/use-thread-detail";
 import { useThreadSelection } from "../state/use-thread-selection";
 import { enqueueThreadOutboxMessage } from "./thread-outbox";
 import { useThreadOutboxMessages } from "./use-thread-outbox";
+import { threadEnvironment } from "./threads";
 
 export function appendReviewCommentToDraft(input: {
   readonly environmentId: EnvironmentId;
@@ -76,8 +88,13 @@ export function useThreadDraftForThread(input: {
 export function useThreadComposerState() {
   const { selectedThread: selectedThreadShell } = useThreadSelection();
   const selectedThreadDetail = useSelectedThreadDetail();
+  const serverConfig = useEnvironmentServerConfig(selectedThreadShell?.environmentId ?? null);
   const composerDrafts = useAtomValue(composerDraftsAtom);
   const queuedMessagesByThreadKey = useThreadOutboxMessages();
+  const setThreadGoal = useAtomCommand(threadEnvironment.setGoal, { reportFailure: false });
+  const pauseThreadGoal = useAtomCommand(threadEnvironment.pauseGoal, { reportFailure: false });
+  const resumeThreadGoal = useAtomCommand(threadEnvironment.resumeGoal, { reportFailure: false });
+  const clearThreadGoal = useAtomCommand(threadEnvironment.clearGoal, { reportFailure: false });
 
   useEffect(() => {
     ensureComposerDraftsLoaded();
@@ -143,7 +160,56 @@ export function useThreadComposerState() {
     const thread = selectedThreadDetail ?? selectedThreadShell;
     const text = draft.text.trim();
     const attachments = draft.attachments;
-    if (text.length === 0 && attachments.length === 0) {
+    const submission = resolveThreadComposerSubmission({
+      text: draft.text,
+      attachmentCount: attachments.length,
+    });
+    if (submission.kind === "empty") {
+      return null;
+    }
+
+    if (submission.kind === "goal") {
+      if (submission.command.action === "missing-objective") {
+        setPendingConnectionError("Type an objective after /goal, or use pause, resume, or clear.");
+        return null;
+      }
+
+      const modelSelection = draft.modelSelection ?? thread.modelSelection;
+      const providerDriver = serverConfig?.providers.find(
+        (provider) => provider.instanceId === modelSelection.instanceId,
+      )?.driver;
+      if (!providerSupportsThreadGoals(providerDriver)) {
+        setPendingConnectionError(
+          "Goals require Codex. Switch to a Codex model before using /goal.",
+        );
+        return null;
+      }
+
+      setPendingConnectionError(null);
+      const result = await dispatchThreadGoalCommand({
+        command: submission.command,
+        target: {
+          environmentId: selectedThreadShell.environmentId,
+          threadId: selectedThreadShell.id,
+        },
+        operations: {
+          setGoal: setThreadGoal,
+          pauseGoal: pauseThreadGoal,
+          resumeGoal: resumeThreadGoal,
+          clearGoal: clearThreadGoal,
+        },
+      });
+      if (result._tag === "Failure") {
+        if (!isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          setPendingConnectionError(
+            error instanceof Error ? error.message : "The goal command failed.",
+          );
+        }
+        return null;
+      }
+
+      clearComposerDraftContent(threadKey);
       return null;
     }
 
@@ -179,7 +245,15 @@ export function useThreadComposerState() {
       );
     });
     return messageId;
-  }, [selectedThreadDetail, selectedThreadShell]);
+  }, [
+    clearThreadGoal,
+    pauseThreadGoal,
+    resumeThreadGoal,
+    selectedThreadDetail,
+    selectedThreadShell,
+    serverConfig,
+    setThreadGoal,
+  ]);
 
   const onChangeDraftMessage = useCallback(
     (value: string) => {

@@ -71,7 +71,7 @@ describe("readPathFromLoginShell", () => {
       ) => string
     >(() => "__T3CODE_ENV_PATH_START__\n/a:/b\n__T3CODE_ENV_PATH_END__\n");
 
-    expect(readPathFromLoginShell("/opt/homebrew/bin/fish", execFile)).toBe("/a:/b");
+    expect(readPathFromLoginShell("/opt/homebrew/bin/fish", "darwin", execFile)).toBe("/a:/b");
     expect(execFile).toHaveBeenCalledTimes(1);
 
     const firstCall = execFile.mock.calls[0] as
@@ -93,11 +93,28 @@ describe("readPathFromLoginShell", () => {
     const [shell, args, options] = firstCall;
     expect(shell).toBe("/opt/homebrew/bin/fish");
     expect(args).toHaveLength(2);
-    expect(args?.[0]).toBe("-ilc");
+    expect(args?.[0]).toBe("-lc");
     expect(args?.[1]).toContain("printenv PATH || true");
     expect(args?.[1]).toContain("__T3CODE_ENV_PATH_START__");
     expect(args?.[1]).toContain("__T3CODE_ENV_PATH_END__");
     expect(options).toEqual({ encoding: "utf8", timeout: 5000, killSignal: "SIGKILL" });
+  });
+
+  it("keeps interactive login probing on Linux", () => {
+    const execFile = vi.fn<
+      (
+        file: string,
+        args: ReadonlyArray<string>,
+        options: {
+          encoding: "utf8";
+          timeout: number;
+          killSignal?: NodeJS.Signals | number;
+        },
+      ) => string
+    >(() => "__T3CODE_ENV_PATH_START__\n/a:/b\n__T3CODE_ENV_PATH_END__\n");
+
+    expect(readPathFromLoginShell("/bin/bash", "linux", execFile)).toBe("/a:/b");
+    expect(execFile.mock.calls[0]?.[1]?.[0]).toBe("-ilc");
   });
 });
 
@@ -152,7 +169,9 @@ describe("readEnvironmentFromLoginShell", () => {
       ].join("\n"),
     );
 
-    expect(readEnvironmentFromLoginShell("/bin/zsh", ["PATH", "SSH_AUTH_SOCK"], execFile)).toEqual({
+    expect(
+      readEnvironmentFromLoginShell("/bin/zsh", ["PATH", "SSH_AUTH_SOCK"], "darwin", execFile),
+    ).toEqual({
       PATH: "/a:/b",
       SSH_AUTH_SOCK: "/tmp/secretive.sock",
     });
@@ -176,7 +195,9 @@ describe("readEnvironmentFromLoginShell", () => {
       ].join("\n"),
     );
 
-    expect(readEnvironmentFromLoginShell("/bin/zsh", ["PATH", "SSH_AUTH_SOCK"], execFile)).toEqual({
+    expect(
+      readEnvironmentFromLoginShell("/bin/zsh", ["PATH", "SSH_AUTH_SOCK"], "darwin", execFile),
+    ).toEqual({
       PATH: "/a:/b",
     });
   });
@@ -194,7 +215,7 @@ describe("readEnvironmentFromLoginShell", () => {
       ),
     );
 
-    expect(readEnvironmentFromLoginShell("/bin/zsh", ["CUSTOM_VAR"], execFile)).toEqual({
+    expect(readEnvironmentFromLoginShell("/bin/zsh", ["CUSTOM_VAR"], "darwin", execFile)).toEqual({
       CUSTOM_VAR: "  padded value  ",
     });
   });

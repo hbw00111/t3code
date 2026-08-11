@@ -1,9 +1,11 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
+import { DEFAULT_CLIENT_SETTINGS, type UiLanguage } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 
 import type * as Electron from "electron";
 
@@ -13,6 +15,7 @@ import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as DesktopApplicationMenu from "./DesktopApplicationMenu.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopClientSettings from "../settings/DesktopClientSettings.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 
@@ -96,28 +99,57 @@ const makeElectronMenuLayer = (
     showContextMenu: () => Effect.succeed(Option.none()),
   } satisfies ElectronMenu.ElectronMenu["Service"]);
 
+const makeQueuedElectronMenuLayer = (
+  applicationMenuTemplates: Queue.Queue<readonly Electron.MenuItemConstructorOptions[]>,
+) =>
+  Layer.succeed(ElectronMenu.ElectronMenu, {
+    setApplicationMenu: (template) =>
+      Queue.offer(applicationMenuTemplates, template).pipe(Effect.asVoid),
+    popupTemplate: () => Effect.void,
+    showContextMenu: () => Effect.succeed(Option.none()),
+  } satisfies ElectronMenu.ElectronMenu["Service"]);
+
+const makeMenuLayer = (
+  selectedAction: Deferred.Deferred<string>,
+  electronMenuLayer: Layer.Layer<ElectronMenu.ElectronMenu>,
+  uiLanguage: UiLanguage,
+  platform: NodeJS.Platform = environmentInput.platform,
+) =>
+  DesktopApplicationMenu.layer.pipe(
+    Layer.provideMerge(electronMenuLayer),
+    Layer.provideMerge(makeDesktopWindowLayer(selectedAction)),
+    Layer.provideMerge(desktopUpdatesLayer),
+    Layer.provideMerge(electronDialogLayer),
+    Layer.provideMerge(electronAppLayer),
+    Layer.provideMerge(
+      DesktopClientSettings.layerTest(Option.some({ ...DEFAULT_CLIENT_SETTINGS, uiLanguage })),
+    ),
+    Layer.provideMerge(
+      DesktopEnvironment.layer({ ...environmentInput, platform }).pipe(
+        Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),
+      ),
+    ),
+  );
+
 const configureMenu = (
   selectedAction: Deferred.Deferred<string>,
   applicationMenuTemplate: Deferred.Deferred<readonly Electron.MenuItemConstructorOptions[]>,
+  uiLanguage: UiLanguage = "en",
+  platform: NodeJS.Platform = environmentInput.platform,
 ) =>
   Effect.gen(function* () {
     const menu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
     yield* menu.configure;
   }).pipe(
     Effect.provide(
-      DesktopApplicationMenu.layer.pipe(
-        Layer.provideMerge(makeElectronMenuLayer(applicationMenuTemplate)),
-        Layer.provideMerge(makeDesktopWindowLayer(selectedAction)),
-        Layer.provideMerge(desktopUpdatesLayer),
-        Layer.provideMerge(electronDialogLayer),
-        Layer.provideMerge(electronAppLayer),
-        Layer.provideMerge(
-          DesktopEnvironment.layer(environmentInput).pipe(
-            Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),
-          ),
-        ),
+      makeMenuLayer(
+        selectedAction,
+        makeElectronMenuLayer(applicationMenuTemplate),
+        uiLanguage,
+        platform,
       ),
     ),
+    Effect.scoped,
   );
 
 describe("DesktopApplicationMenu", () => {
@@ -144,6 +176,132 @@ describe("DesktopApplicationMenu", () => {
 
       settingsClick({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
       assert.equal(yield* Deferred.await(selectedAction), "open-settings");
+    }),
+  );
+
+  it.effect("builds the initial menu from the persisted UI language", () =>
+    Effect.gen(function* () {
+      const selectedAction = yield* Deferred.make<string>();
+      const applicationMenuTemplate =
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+
+      yield* configureMenu(selectedAction, applicationMenuTemplate, "zh-CN");
+
+      const template = yield* Deferred.await(applicationMenuTemplate);
+      assert.isDefined(template.find((item) => item.label === "文件"));
+      assert.isDefined(template.find((item) => item.label === "视图"));
+
+      const editMenu = template.find((item) => item.label === "编辑");
+      assert.isDefined(editMenu);
+      if (!Array.isArray(editMenu.submenu)) {
+        throw new Error("Expected Edit menu submenu to be an array.");
+      }
+      assert.deepEqual(
+        editMenu.submenu
+          .filter((item) =>
+            ["undo", "redo", "cut", "copy", "paste", "selectAll"].includes(item.role ?? ""),
+          )
+          .map(({ role, label }) => ({ role, label })),
+        [
+          { role: "undo", label: "撤销" },
+          { role: "redo", label: "重做" },
+          { role: "cut", label: "剪切" },
+          { role: "copy", label: "复制" },
+          { role: "paste", label: "粘贴" },
+          { role: "selectAll", label: "全选" },
+        ],
+      );
+
+      const windowMenu = template.find((item) => item.label === "窗口");
+      assert.isDefined(windowMenu);
+      if (!Array.isArray(windowMenu.submenu)) {
+        throw new Error("Expected Window menu submenu to be an array.");
+      }
+      assert.deepEqual(
+        windowMenu.submenu.map(({ role, label }) => ({ role, label })),
+        [
+          { role: "minimize", label: "最小化" },
+          { role: "zoom", label: "缩放" },
+          { role: "close", label: "关闭" },
+        ],
+      );
+    }),
+  );
+
+  it.effect("preserves macOS-specific native menu roles in Chinese", () =>
+    Effect.gen(function* () {
+      const selectedAction = yield* Deferred.make<string>();
+      const applicationMenuTemplate =
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+
+      yield* configureMenu(selectedAction, applicationMenuTemplate, "zh-CN", "darwin");
+
+      const template = yield* Deferred.await(applicationMenuTemplate);
+      const editMenu = template.find((item) => item.label === "编辑");
+      assert.isDefined(editMenu);
+      if (!Array.isArray(editMenu.submenu)) {
+        throw new Error("Expected Edit menu submenu to be an array.");
+      }
+      assert.deepEqual(
+        editMenu.submenu
+          .filter((item) => ["pasteAndMatchStyle", "delete", "selectAll"].includes(item.role ?? ""))
+          .map(({ role, label }) => ({ role, label })),
+        [
+          { role: "pasteAndMatchStyle", label: "粘贴并匹配样式" },
+          { role: "delete", label: "删除" },
+          { role: "selectAll", label: "全选" },
+        ],
+      );
+      assert.isDefined(editMenu.submenu.find((item) => item.label === "替换"));
+      assert.isDefined(editMenu.submenu.find((item) => item.label === "语音"));
+
+      const windowMenu = template.find((item) => item.label === "窗口");
+      assert.isDefined(windowMenu);
+      if (!Array.isArray(windowMenu.submenu)) {
+        throw new Error("Expected Window menu submenu to be an array.");
+      }
+      assert.deepEqual(
+        windowMenu.submenu
+          .filter((item) => item.role !== undefined)
+          .map(({ role, label }) => ({ role, label })),
+        [
+          { role: "minimize", label: "最小化" },
+          { role: "zoom", label: "缩放" },
+          { role: "front", label: "全部移到最前面" },
+        ],
+      );
+    }),
+  );
+
+  it.effect("rebuilds the menu after the UI language setting changes", () =>
+    Effect.gen(function* () {
+      const selectedAction = yield* Deferred.make<string>();
+      const applicationMenuTemplates =
+        yield* Queue.unbounded<readonly Electron.MenuItemConstructorOptions[]>();
+
+      yield* Effect.gen(function* () {
+        const menu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
+        const settings = yield* DesktopClientSettings.DesktopClientSettings;
+        yield* menu.configure;
+        const initialTemplate = yield* Queue.take(applicationMenuTemplates);
+        assert.isDefined(initialTemplate.find((item) => item.label === "File"));
+
+        yield* Effect.yieldNow;
+        yield* settings.set({ ...DEFAULT_CLIENT_SETTINGS, uiLanguage: "zh-CN" });
+
+        const updatedTemplate = yield* Queue.take(applicationMenuTemplates);
+        assert.isDefined(updatedTemplate.find((item) => item.label === "文件"));
+        assert.equal(updatedTemplate.find((item) => item.role === "help")?.label, "帮助");
+      }).pipe(
+        Effect.provide(
+          makeMenuLayer(
+            selectedAction,
+            makeQueuedElectronMenuLayer(applicationMenuTemplates),
+            "en",
+          ),
+        ),
+        Effect.scoped,
+      );
     }),
   );
 

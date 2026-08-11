@@ -83,6 +83,14 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
       }),
   );
 
+  public readonly setGoalImpl = vi.fn((_objective: string): Promise<void> => Promise.resolve());
+
+  public readonly pauseGoalImpl = vi.fn((): Promise<void> => Promise.resolve());
+
+  public readonly resumeGoalImpl = vi.fn((): Promise<void> => Promise.resolve());
+
+  public readonly clearGoalImpl = vi.fn((): Promise<void> => Promise.resolve());
+
   public readonly interruptTurnImpl = vi.fn(
     (_turnId?: TurnId): Promise<void> => Promise.resolve(undefined),
   );
@@ -129,6 +137,22 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
 
   sendTurn(input: CodexSessionRuntimeSendTurnInput) {
     return Effect.promise(() => this.sendTurnImpl(input));
+  }
+
+  setGoal(objective: string) {
+    return Effect.promise(() => this.setGoalImpl(objective));
+  }
+
+  pauseGoal() {
+    return Effect.promise(() => this.pauseGoalImpl());
+  }
+
+  resumeGoal() {
+    return Effect.promise(() => this.resumeGoalImpl());
+  }
+
+  clearGoal() {
+    return Effect.promise(() => this.clearGoalImpl());
   }
 
   interruptTurn(turnId?: TurnId) {
@@ -357,6 +381,32 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         effort: "high",
         serviceTier: "priority",
       });
+    }),
+  );
+
+  it.effect("forwards native thread goal operations to the Codex runtime", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const threadId = asThreadId("sess-goal");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const runtime = sessionRuntimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+      const setThreadGoal = adapter.setThreadGoal;
+      NodeAssert.ok(setThreadGoal);
+
+      yield* setThreadGoal({ threadId, operation: "set", objective: "Finish the migration" });
+      yield* setThreadGoal({ threadId, operation: "pause" });
+      yield* setThreadGoal({ threadId, operation: "resume" });
+      yield* setThreadGoal({ threadId, operation: "clear" });
+
+      NodeAssert.deepStrictEqual(runtime.setGoalImpl.mock.calls, [["Finish the migration"]]);
+      NodeAssert.equal(runtime.pauseGoalImpl.mock.calls.length, 1);
+      NodeAssert.equal(runtime.resumeGoalImpl.mock.calls.length, 1);
+      NodeAssert.equal(runtime.clearGoalImpl.mock.calls.length, 1);
     }),
   );
 

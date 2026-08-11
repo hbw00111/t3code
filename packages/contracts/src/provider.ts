@@ -20,6 +20,7 @@ import {
   ProviderSandboxMode,
   ProviderUserInputAnswers,
   RuntimeMode,
+  ThreadGoalOperation,
 } from "./orchestration.ts";
 import { ProviderInstanceId, ProviderDriverKind } from "./providerInstance.ts";
 
@@ -94,6 +95,18 @@ export const ProviderStopSessionInput = Schema.Struct({
   threadId: ThreadId,
 });
 export type ProviderStopSessionInput = typeof ProviderStopSessionInput.Type;
+
+export const ProviderThreadGoalInput = Schema.Struct({
+  threadId: ThreadId,
+  operation: ThreadGoalOperation,
+  objective: Schema.optional(TrimmedNonEmptyString),
+}).check(
+  Schema.makeFilter(
+    (input) =>
+      input.operation !== "set" || input.objective !== undefined || "objective is required for set",
+  ),
+);
+export type ProviderThreadGoalInput = typeof ProviderThreadGoalInput.Type;
 
 export const ProviderRespondToRequestInput = Schema.Struct({
   threadId: ThreadId,

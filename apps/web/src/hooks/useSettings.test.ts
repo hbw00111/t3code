@@ -4,9 +4,31 @@ import {
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { mergeEnvironmentSettings, resolveEnvironmentIdentificationMode } from "./useSettings";
+const persistence = vi.hoisted(() => ({
+  getClientSettings: vi.fn(),
+  setClientSettings: vi.fn(),
+}));
+
+vi.mock("~/localApi", () => ({
+  ensureLocalApi: () => ({ persistence }),
+}));
+
+import {
+  __persistClientSettingsForTests,
+  __resetClientSettingsPersistenceForTests,
+  __setClientSettingsForTests,
+  getClientSettings,
+  mergeEnvironmentSettings,
+  resolveEnvironmentIdentificationMode,
+} from "./useSettings";
+
+beforeEach(() => {
+  __resetClientSettingsPersistenceForTests();
+  persistence.getClientSettings.mockReset();
+  persistence.setClientSettings.mockReset();
+});
 
 describe("resolveEnvironmentIdentificationMode", () => {
   it("keeps identification hidden until client settings hydrate", () => {
@@ -75,5 +97,35 @@ describe("mergeEnvironmentSettings", () => {
 
     expect(settings.providerInstances).toBe(serverSettings.providerInstances);
     expect(settings.favorites).toBe(clientSettings.favorites);
+  });
+});
+
+describe("client settings persistence", () => {
+  it("rolls an optimistic language switch back when persistence fails", async () => {
+    const initialSettings = { ...DEFAULT_CLIENT_SETTINGS, uiLanguage: "en" as const };
+    const chineseSettings = { ...initialSettings, uiLanguage: "zh-CN" as const };
+    __setClientSettingsForTests(initialSettings);
+    persistence.setClientSettings.mockRejectedValueOnce(new Error("disk full"));
+
+    await __persistClientSettingsForTests(chineseSettings);
+
+    expect(getClientSettings()).toBe(initialSettings);
+  });
+
+  it("keeps the newest successful write after an earlier queued write fails", async () => {
+    const initialSettings = { ...DEFAULT_CLIENT_SETTINGS, uiLanguage: "en" as const };
+    const failedSettings = { ...initialSettings, uiLanguage: "zh-CN" as const };
+    const successfulSettings = { ...failedSettings, timestampFormat: "24-hour" as const };
+    __setClientSettingsForTests(initialSettings);
+    persistence.setClientSettings
+      .mockRejectedValueOnce(new Error("first write failed"))
+      .mockResolvedValueOnce(undefined);
+
+    void __persistClientSettingsForTests(failedSettings);
+    await __persistClientSettingsForTests(successfulSettings);
+
+    expect(getClientSettings()).toBe(successfulSettings);
+    expect(persistence.setClientSettings).toHaveBeenNthCalledWith(1, failedSettings);
+    expect(persistence.setClientSettings).toHaveBeenNthCalledWith(2, successfulSettings);
   });
 });

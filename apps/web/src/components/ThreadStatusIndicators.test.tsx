@@ -1,8 +1,35 @@
 import { ThreadId } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { ThreadWorktreeIndicator } from "./ThreadStatusIndicators";
+import { i18n } from "../i18n/i18n";
+import { ThreadStatusLabel, ThreadWorktreeIndicator } from "./ThreadStatusIndicators";
+
+afterEach(async () => {
+  await i18n.changeLanguage("en");
+});
+
+describe("ThreadStatusLabel", () => {
+  it("translates semantic thread states at render time", async () => {
+    await i18n.changeLanguage("zh-CN");
+
+    const markup = renderToStaticMarkup(
+      <ThreadStatusLabel
+        status={{
+          kind: "pending-approval",
+          label: "Pending Approval",
+          colorClass: "text-amber-600",
+          dotClass: "bg-amber-500",
+          pulse: false,
+        }}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="等待批准"');
+    expect(markup).toContain("等待批准");
+    expect(markup).not.toContain("Pending Approval");
+  });
+});
 
 describe("ThreadWorktreeIndicator", () => {
   it("renders the worktree folder and branch in an accessible label", () => {

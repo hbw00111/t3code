@@ -46,6 +46,10 @@ export type UpdateThreadMetadataInput = CommandInput<"thread.meta.update">;
 export type SetThreadRuntimeModeInput = CommandInput<"thread.runtime-mode.set">;
 export type SetThreadInteractionModeInput = CommandInput<"thread.interaction-mode.set">;
 export type StartThreadTurnInput = CommandInput<"thread.turn.start">;
+export type SetThreadGoalInput = CommandInput<"thread.goal.set">;
+export type PauseThreadGoalInput = CommandInput<"thread.goal.pause">;
+export type ResumeThreadGoalInput = CommandInput<"thread.goal.resume">;
+export type ClearThreadGoalInput = CommandInput<"thread.goal.clear">;
 export type InterruptThreadTurnInput = CommandInput<"thread.turn.interrupt">;
 export type RespondToThreadApprovalInput = CommandInput<"thread.approval.respond">;
 export type RespondToThreadUserInputInput = CommandInput<"thread.user-input.respond">;
@@ -270,6 +274,54 @@ export const startThreadTurn: (input: StartThreadTurnInput) => CommandEffect = E
   return yield* dispatch({
     ...input,
     type: "thread.turn.start",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const setThreadGoal: (input: SetThreadGoalInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.setThreadGoal",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.goal.set",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const pauseThreadGoal: (input: PauseThreadGoalInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.pauseThreadGoal",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.goal.pause",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const resumeThreadGoal: (input: ResumeThreadGoalInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.resumeThreadGoal",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.goal.resume",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const clearThreadGoal: (input: ClearThreadGoalInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.clearThreadGoal",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.goal.clear",
     commandId: metadata.commandId,
     createdAt: metadata.createdAt,
   });

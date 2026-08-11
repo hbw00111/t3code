@@ -6,6 +6,7 @@ import {
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   isCollapsedCursorAdjacentToInlineToken,
+  parseComposerGoalCommand,
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
   shouldSubmitComposerOnEnter,
@@ -370,5 +371,26 @@ describe("parseStandaloneComposerSlashCommand", () => {
 
   it("ignores slash commands with extra message text", () => {
     expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
+  });
+});
+
+describe("parseComposerGoalCommand", () => {
+  it("parses an objective without losing its original casing", () => {
+    expect(parseComposerGoalCommand("/goal Ship the Chinese UI")).toEqual({
+      action: "set",
+      objective: "Ship the Chinese UI",
+    });
+  });
+
+  it.each(["pause", "resume", "clear"] as const)("parses the %s action", (action) => {
+    expect(parseComposerGoalCommand(`/goal ${action}`)).toEqual({ action });
+  });
+
+  it("reports a missing objective", () => {
+    expect(parseComposerGoalCommand(" /goal ")).toEqual({ action: "missing-objective" });
+  });
+
+  it("ignores ordinary messages", () => {
+    expect(parseComposerGoalCommand("please set a goal")).toBeNull();
   });
 });

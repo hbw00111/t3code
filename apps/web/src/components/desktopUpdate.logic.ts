@@ -1,4 +1,6 @@
 import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
+import type { TFunction } from "i18next";
+import { i18n } from "../i18n";
 import { isWindowsPlatform } from "../lib/utils";
 
 export type DesktopUpdateButtonAction = "download" | "install" | "none";
@@ -56,54 +58,71 @@ export function isDesktopUpdateButtonDisabled(state: DesktopUpdateState | null):
   return state?.status === "downloading";
 }
 
-export function getArm64IntelBuildWarningDescription(state: DesktopUpdateState): string {
+export function getArm64IntelBuildWarningDescription(
+  state: DesktopUpdateState,
+  t: TFunction = i18n.t.bind(i18n),
+): string {
   if (!shouldShowArm64IntelBuildWarning(state)) {
-    return "This install is using the correct architecture.";
+    return t("desktopUpdate.correctArchitecture");
   }
 
   const action = resolveDesktopUpdateButtonAction(state);
   if (action === "download") {
-    return "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. Download the available update to switch to the native Apple Silicon build.";
+    return t("desktopUpdate.arm64WarningDownload");
   }
   if (action === "install") {
-    return "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. Restart to install the downloaded Apple Silicon build.";
+    return t("desktopUpdate.arm64WarningInstall");
   }
-  return "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. The next app update will replace it with the native Apple Silicon build.";
+  return t("desktopUpdate.arm64WarningNextUpdate");
 }
 
-export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string {
+export function getDesktopUpdateButtonTooltip(
+  state: DesktopUpdateState,
+  t: TFunction = i18n.t.bind(i18n),
+): string {
   if (state.status === "available") {
-    return `Update ${state.availableVersion ?? "available"} ready to download`;
+    return state.availableVersion
+      ? t("desktopUpdate.tooltipReadyToDownloadVersion", { version: state.availableVersion })
+      : t("desktopUpdate.tooltipReadyToDownload");
   }
   if (state.status === "downloading") {
-    const progress =
-      typeof state.downloadPercent === "number" ? ` (${Math.floor(state.downloadPercent)}%)` : "";
-    return `Downloading update${progress}`;
+    return typeof state.downloadPercent === "number"
+      ? t("desktopUpdate.tooltipDownloadingPercent", {
+          percent: Math.floor(state.downloadPercent),
+        })
+      : t("desktopUpdate.tooltipDownloading");
   }
   if (state.status === "downloaded") {
-    return `Update ${state.downloadedVersion ?? state.availableVersion ?? "ready"} downloaded. Click to restart and install.`;
+    const version = state.downloadedVersion ?? state.availableVersion;
+    return version
+      ? t("desktopUpdate.tooltipDownloadedVersion", { version })
+      : t("desktopUpdate.tooltipDownloaded");
   }
   if (state.status === "error") {
     if (state.errorContext === "download" && state.availableVersion) {
-      return `Download failed for ${state.availableVersion}. Click to retry.`;
+      return t("desktopUpdate.tooltipDownloadFailed", { version: state.availableVersion });
     }
     if (state.errorContext === "install" && state.downloadedVersion) {
-      return `Install failed for ${state.downloadedVersion}. Click to retry.`;
+      return t("desktopUpdate.tooltipInstallFailed", { version: state.downloadedVersion });
     }
-    return state.message ?? "Update failed";
+    return state.message ?? t("desktopUpdate.updateFailed");
   }
-  return "Up to date";
+  return t("desktopUpdate.upToDate");
 }
 
 export function getDesktopUpdateInstallConfirmationMessage(
   state: Pick<DesktopUpdateState, "availableVersion" | "downloadedVersion">,
   platform = "",
+  t: TFunction = i18n.t.bind(i18n),
 ): string {
   const version = state.downloadedVersion ?? state.availableVersion;
   const windowsInstallWarning = isWindowsPlatform(platform)
-    ? "\n\nOn Windows, T3 Code may remain closed for several minutes while the update installs, and no installer window may appear. T3 Code will reopen automatically when installation finishes."
+    ? `\n\n${t("desktopUpdate.windowsInstallWarning")}`
     : "";
-  return `Install update${version ? ` ${version}` : ""} and restart T3 Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.${windowsInstallWarning}`;
+  const title = version
+    ? t("desktopUpdate.installConfirmationVersion", { version })
+    : t("desktopUpdate.installConfirmation");
+  return `${title}\n\n${t("desktopUpdate.runningTasksInterrupted")}${windowsInstallWarning}`;
 }
 
 export function getDesktopUpdateActionError(result: DesktopUpdateActionResult): string | null {

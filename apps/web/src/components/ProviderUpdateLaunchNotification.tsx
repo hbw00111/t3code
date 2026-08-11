@@ -1,6 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { DownloadIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { useEnvironments } from "~/state/environments";
 import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
@@ -56,6 +57,8 @@ type ProviderUpdateToastId = ReturnType<typeof toastManager.add>;
 const SETTLING_GRACE_MS = 30_000;
 
 function ProviderUpdateEnvironmentsNotification() {
+  const { t, i18n } = useTranslation();
+  const language = i18n.resolvedLanguage ?? i18n.language;
   const navigate = useNavigate();
   const { groups, isAnySettling } = useLocalEnvironmentUpdateGroups();
   const { dismissedNotificationKeys, dismissNotificationKey } =
@@ -116,6 +119,28 @@ function ProviderUpdateEnvironmentsNotification() {
     void navigate({ to: "/settings/providers" });
   }, [navigate]);
 
+  // Keep the imperative toast shell in sync without remounting its row body;
+  // a remount would discard an in-flight environment update's local state.
+  useEffect(() => {
+    const active = activeToastRef.current;
+    if (active === null) {
+      return;
+    }
+    toastManager.update(active.toastId, {
+      title: getProviderUpdateInitialToastView(
+        {
+          updateProviders: candidateUnion,
+          oneClickProviders: candidateUnion,
+        },
+        t,
+      ).title,
+      actionProps: {
+        children: t("common.settings"),
+        onClick: openProviderSettings,
+      },
+    });
+  }, [candidateUnion, language, openProviderSettings, t]);
+
   useEffect(() => {
     // Whether a fresh prompt can actually be shown for the current update set.
     const canShowPrompt =
@@ -160,10 +185,13 @@ function ProviderUpdateEnvironmentsNotification() {
     const toastId = toastManager.add(
       stackedThreadToast({
         type: "warning",
-        title: getProviderUpdateInitialToastView({
-          updateProviders: candidateUnion,
-          oneClickProviders: candidateUnion,
-        }).title,
+        title: getProviderUpdateInitialToastView(
+          {
+            updateProviders: candidateUnion,
+            oneClickProviders: candidateUnion,
+          },
+          t,
+        ).title,
         description: (
           <ProviderUpdateEnvironmentRows
             onInteract={() => {
@@ -173,7 +201,7 @@ function ProviderUpdateEnvironmentsNotification() {
         ),
         timeout: 0,
         actionProps: {
-          children: "Settings",
+          children: t("common.settings"),
           onClick: openProviderSettings,
         },
         actionVariant: "outline",
@@ -189,9 +217,11 @@ function ProviderUpdateEnvironmentsNotification() {
     notificationKey,
     isGated,
     candidateUnion,
+    language,
     dismissedNotificationKeys,
     dismissNotificationKey,
     openProviderSettings,
+    t,
   ]);
 
   return null;

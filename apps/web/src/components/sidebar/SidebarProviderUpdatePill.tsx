@@ -3,6 +3,7 @@ import { useAtomValue } from "@effect/atom-react";
 import type { ServerProvider } from "@t3tools/contracts";
 import { CircleCheckIcon, DownloadIcon, LoaderIcon, TriangleAlertIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
 
 import { primaryServerProvidersAtom } from "../../state/server";
 import {
@@ -39,6 +40,7 @@ function latestProviderCheckedAt(
 }
 
 export function SidebarProviderUpdatePill() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const providers = useAtomValue(primaryServerProvidersAtom);
   const [dismissedKeys, setDismissedKeys] = useState<ReadonlySet<string>>(() => new Set());
@@ -48,12 +50,16 @@ export function SidebarProviderUpdatePill() {
   const [dismissAfterExitKey, setDismissAfterExitKey] = useState<string | null>(null);
   const [visibleAfterIso, setVisibleAfterIso] = useState<string | undefined>();
   const effectiveVisibleAfterIso = visibleAfterIso ?? latestProviderCheckedAt(providers);
-  const view = getProviderUpdateSidebarPillView(providers, {
-    ...(effectiveVisibleAfterIso !== undefined
-      ? { visibleAfterIso: effectiveVisibleAfterIso }
-      : {}),
-    dismissedKeys,
-  });
+  const view = getProviderUpdateSidebarPillView(
+    providers,
+    {
+      ...(effectiveVisibleAfterIso !== undefined
+        ? { visibleAfterIso: effectiveVisibleAfterIso }
+        : {}),
+      dismissedKeys,
+    },
+    t,
+  );
 
   useEffect(() => {
     if (visibleAfterIso === undefined && effectiveVisibleAfterIso !== undefined) {
@@ -101,6 +107,13 @@ export function SidebarProviderUpdatePill() {
     if (view.key !== renderedView.key) {
       startExit(renderedView.key, view);
       return;
+    }
+    if (
+      view.title !== renderedView.title ||
+      view.description !== renderedView.description ||
+      view.dismissible !== renderedView.dismissible
+    ) {
+      setRenderedView(view);
     }
   }, [exitingKey, renderedView, startExit, view]);
 
@@ -192,7 +205,7 @@ export function SidebarProviderUpdatePill() {
             render={
               <button
                 type="button"
-                aria-label="Dismiss provider update notice"
+                aria-label={t("providerUpdate.dismissNotice")}
                 className="relative z-[1] mr-1 inline-flex size-5 items-center justify-center rounded-md opacity-70 transition-opacity hover:opacity-100"
                 onClick={() => startExit(displayedView.key, null, displayedView.key)}
               >
@@ -200,7 +213,7 @@ export function SidebarProviderUpdatePill() {
               </button>
             }
           />
-          <TooltipPopup side="top">Dismiss until provider status changes</TooltipPopup>
+          <TooltipPopup side="top">{t("providerUpdate.dismissUntilStatusChanges")}</TooltipPopup>
         </Tooltip>
       )}
     </div>

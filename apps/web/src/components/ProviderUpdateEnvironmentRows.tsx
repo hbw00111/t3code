@@ -1,6 +1,8 @@
 import { CheckIcon } from "lucide-react";
 import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import type { EnvironmentId, ServerProvider } from "@t3tools/contracts";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -22,7 +24,6 @@ import {
   type LocalProviderUpdateOutcome,
   type ProviderUpdateRowStatus,
   type ProviderUpdateRowStatusKind,
-  type ProviderUpdateToastView,
 } from "./ProviderUpdateLaunchNotification.logic";
 import { Button } from "./ui/button";
 import { Spinner } from "./ui/spinner";
@@ -31,6 +32,34 @@ type ProviderUpdateCommandResult = AtomCommandResult<
   { readonly providers: ReadonlyArray<ServerProvider> },
   unknown
 >;
+
+type ProviderUpdateRowError =
+  | { readonly kind: "message"; readonly message: string }
+  | { readonly kind: "timeout" }
+  | { readonly kind: "disconnected" }
+  | { readonly kind: "failed" };
+
+interface ProviderUpdateRowResult {
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly providerCount: number;
+}
+
+function providerUpdateRowErrorText(
+  error: ProviderUpdateRowError | undefined,
+  t: TFunction,
+): string | undefined {
+  if (!error) return undefined;
+  switch (error.kind) {
+    case "message":
+      return error.message;
+    case "timeout":
+      return t("providerUpdate.updateTimedOut");
+    case "disconnected":
+      return t("providerUpdate.environmentDisconnected");
+    case "failed":
+      return t("providerUpdate.updateFailedSentence");
+  }
+}
 
 /**
  * Map one targeted instance's update command result into the settled-outcome
@@ -110,10 +139,12 @@ function EnvironmentUpdateRow({
   group,
   status,
   onUpdate,
+  t,
 }: {
   readonly group: LocalEnvironmentUpdateGroup;
   readonly status: ProviderUpdateRowStatus;
   readonly onUpdate: () => void;
+  readonly t: TFunction;
 }) {
   let trailing: ReactNode;
   switch (status.kind) {
@@ -127,14 +158,14 @@ function EnvironmentUpdateRow({
     case "unchanged":
       trailing = (
         <Button size="xs" variant="outline" onClick={onUpdate}>
-          Retry
+          {t("common.retry")}
         </Button>
       );
       break;
     default:
       trailing = (
         <Button size="xs" onClick={onUpdate}>
-          Update
+          {t("common.update")}
         </Button>
       );
       break;
@@ -162,6 +193,8 @@ export function ProviderUpdateEnvironmentRows({
   /** Called the first time the user triggers an update, so the host can stop refreshing the prompt. */
   readonly onInteract?: () => void;
 }) {
+  const { t, i18n } = useTranslation();
+  const language = i18n.resolvedLanguage ?? i18n.language;
   const { groups } = useLocalEnvironmentUpdateGroups();
   const updateProvider = useAtomCommand(serverEnvironment.updateProvider, {
     reportFailure: false,
@@ -191,11 +224,11 @@ export function ProviderUpdateEnvironmentRows({
   const [pendingEnvironments, setPendingEnvironments] = useState<ReadonlySet<EnvironmentId>>(
     () => new Set(),
   );
-  const [errorByEnvironment, setErrorByEnvironment] = useState<ReadonlyMap<EnvironmentId, string>>(
-    () => new Map(),
-  );
+  const [errorByEnvironment, setErrorByEnvironment] = useState<
+    ReadonlyMap<EnvironmentId, ProviderUpdateRowError>
+  >(() => new Map());
   const [resultByEnvironment, setResultByEnvironment] = useState<
-    ReadonlyMap<EnvironmentId, ProviderUpdateToastView>
+    ReadonlyMap<EnvironmentId, ProviderUpdateRowResult>
   >(() => new Map());
 
   const clearPending = useCallback((environmentId: EnvironmentId) => {
@@ -261,7 +294,7 @@ export function ProviderUpdateEnvironmentRows({
         inFlightEnvironmentsRef.current.delete(environmentId);
         clearPending(environmentId);
         setErrorByEnvironment((previous) =>
-          new Map(previous).set(environmentId, "Update timed out — try again."),
+          new Map(previous).set(environmentId, { kind: "timeout" }),
         );
       }, PENDING_EXPIRY_MS);
       try {
@@ -306,24 +339,25 @@ export function ProviderUpdateEnvironmentRows({
         });
         if (results.length === 0) {
           setErrorByEnvironment((previous) =>
-            new Map(previous).set(
-              environmentId,
-              "This environment isn’t connected — try again once it reconnects.",
-            ),
+            new Map(previous).set(environmentId, { kind: "disconnected" }),
           );
           return;
         }
-        const rejectedMessage = firstRejectedProviderUpdateMessage(results);
+        const rejectedMessage = firstRejectedProviderUpdateMessage(results, t);
         if (rejectedMessage) {
           setErrorByEnvironment((previous) =>
-            new Map(previous).set(environmentId, rejectedMessage),
+            new Map(previous).set(environmentId, {
+              kind: "message",
+              message: rejectedMessage,
+            }),
           );
           return;
         }
-        const view = getProviderUpdateProgressToastView({
+        const result = {
           providers: collectProviderUpdateOutcomeSnapshots(results),
           providerCount,
-        });
+        } satisfies ProviderUpdateRowResult;
+        const view = getProviderUpdateProgressToastView(result, t);
         // Only persist a terminal outcome. A non-terminal ("running"/"initial")
         // view means this dispatch could not confirm completion — e.g. a snapshot
         // came back without its targeted instance (collectProviderUpdateOutcome-
@@ -334,14 +368,16 @@ export function ProviderUpdateEnvironmentRows({
         // the live per-environment provider state (pill) plus the pending expiry
         // drive the row, so it self-heals to whatever the backend actually did.
         if (isTerminalProviderUpdatePhase(view.phase)) {
-          setResultByEnvironment((previous) => new Map(previous).set(environmentId, view));
+          setResultByEnvironment((previous) => new Map(previous).set(environmentId, result));
         }
       } catch (error) {
         if (isCurrentRequest()) {
           setErrorByEnvironment((previous) =>
             new Map(previous).set(
               environmentId,
-              error instanceof Error ? error.message : "Provider update failed.",
+              error instanceof Error
+                ? { kind: "message", message: error.message }
+                : { kind: "failed" },
             ),
           );
         }
@@ -355,27 +391,35 @@ export function ProviderUpdateEnvironmentRows({
         }
       }
     },
-    [clearPending, groupByEnvironment, onInteract, updateProvider],
+    [clearPending, groupByEnvironment, language, onInteract, t, updateProvider],
   );
 
   const rows = groups
-    .map((group) => ({
-      group,
-      status: resolveEnvironmentUpdateRowStatus({
+    .map((group) => {
+      const result = resultByEnvironment.get(group.environmentId);
+      return {
         group,
-        error: errorByEnvironment.get(group.environmentId),
-        result: resultByEnvironment.get(group.environmentId),
-        // Derive the live pill from the candidates this row is actually
-        // tracking, not every provider in the environment. Otherwise an
-        // unrelated provider's recent success (or one candidate succeeding while
-        // another was interrupted) makes the pill report success and hides the
-        // Update action for candidates that are still outdated.
-        pill: getProviderUpdateSidebarPillView(group.candidates, {
-          visibleAfterIso: visibleAfterIsoRef.current,
-        }),
-        isPending: pendingEnvironments.has(group.environmentId),
-      }),
-    }))
+        status: resolveEnvironmentUpdateRowStatus(
+          {
+            group,
+            error: providerUpdateRowErrorText(errorByEnvironment.get(group.environmentId), t),
+            result: result ? getProviderUpdateProgressToastView(result, t) : undefined,
+            // Derive the live pill from the candidates this row is actually
+            // tracking, not every provider in the environment. Otherwise an
+            // unrelated provider's recent success (or one candidate succeeding while
+            // another was interrupted) makes the pill report success and hides the
+            // Update action for candidates that are still outdated.
+            pill: getProviderUpdateSidebarPillView(
+              group.candidates,
+              { visibleAfterIso: visibleAfterIsoRef.current },
+              t,
+            ),
+            isPending: pendingEnvironments.has(group.environmentId),
+          },
+          t,
+        ),
+      };
+    })
     .filter(({ group, status }) => group.candidates.length > 0 || status.kind !== "idle");
 
   if (rows.length === 0) {
@@ -390,6 +434,7 @@ export function ProviderUpdateEnvironmentRows({
           group={group}
           status={status}
           onUpdate={() => handleUpdate(group.environmentId)}
+          t={t}
         />
       ))}
     </div>

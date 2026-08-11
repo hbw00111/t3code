@@ -160,6 +160,8 @@ describe("buildBulkTitleRegenerationContextMenuItem", () => {
       buildBulkTitleRegenerationContextMenuItem({
         supportedCount: 4,
         actionableCount: 3,
+        regenerateLabel: "Regenerate titles (3)",
+        regeneratingLabel: "Regenerating… (4)",
       }),
     ).toEqual({
       id: "regenerate-title",
@@ -172,6 +174,8 @@ describe("buildBulkTitleRegenerationContextMenuItem", () => {
       buildBulkTitleRegenerationContextMenuItem({
         supportedCount: 2,
         actionableCount: 0,
+        regenerateLabel: "Regenerate titles (0)",
+        regeneratingLabel: "Regenerating… (2)",
       }),
     ).toEqual({
       id: "regenerate-title",
@@ -185,6 +189,8 @@ describe("buildBulkTitleRegenerationContextMenuItem", () => {
       buildBulkTitleRegenerationContextMenuItem({
         supportedCount: 0,
         actionableCount: 0,
+        regenerateLabel: "Regenerate titles (0)",
+        regeneratingLabel: "Regenerating… (0)",
       }),
     ).toBeNull();
   });
@@ -1037,7 +1043,7 @@ describe("resolveThreadStatusPill", () => {
           hasPendingUserInput: true,
         },
       }),
-    ).toMatchObject({ label: "Pending Approval", pulse: false });
+    ).toMatchObject({ kind: "pending-approval", pulse: false });
   });
 
   it("shows awaiting input when plan mode is blocked on user answers", () => {
@@ -1048,7 +1054,7 @@ describe("resolveThreadStatusPill", () => {
           hasPendingUserInput: true,
         },
       }),
-    ).toMatchObject({ label: "Awaiting Input", pulse: false });
+    ).toMatchObject({ kind: "awaiting-input", pulse: false });
   });
 
   it("falls back to working when the thread is actively running without blockers", () => {
@@ -1056,7 +1062,7 @@ describe("resolveThreadStatusPill", () => {
       resolveThreadStatusPill({
         thread: baseThread,
       }),
-    ).toMatchObject({ label: "Working", pulse: true });
+    ).toMatchObject({ kind: "working", pulse: true });
   });
 
   it("shows plan ready when a settled plan turn has a proposed plan ready for follow-up", () => {
@@ -1073,7 +1079,7 @@ describe("resolveThreadStatusPill", () => {
           },
         },
       }),
-    ).toMatchObject({ label: "Plan Ready", pulse: false });
+    ).toMatchObject({ kind: "plan-ready", pulse: false });
   });
 
   it("does not manufacture completed state without a client visit marker", () => {
@@ -1107,7 +1113,7 @@ describe("resolveThreadStatusPill", () => {
           },
         },
       }),
-    ).toMatchObject({ label: "Completed", pulse: false });
+    ).toMatchObject({ kind: "completed", pulse: false });
   });
 });
 
@@ -1142,44 +1148,49 @@ describe("resolveProjectStatusIndicator", () => {
     expect(
       resolveProjectStatusIndicator([
         {
+          kind: "completed",
           label: "Completed",
           colorClass: "text-emerald-600",
           dotClass: "bg-emerald-500",
           pulse: false,
         },
         {
+          kind: "pending-approval",
           label: "Pending Approval",
           colorClass: "text-amber-600",
           dotClass: "bg-amber-500",
           pulse: false,
         },
         {
+          kind: "working",
           label: "Working",
           colorClass: "text-sky-600",
           dotClass: "bg-sky-500",
           pulse: true,
         },
       ]),
-    ).toMatchObject({ label: "Pending Approval", dotClass: "bg-amber-500" });
+    ).toMatchObject({ kind: "pending-approval", dotClass: "bg-amber-500" });
   });
 
   it("prefers plan-ready over completed when no stronger action is needed", () => {
     expect(
       resolveProjectStatusIndicator([
         {
+          kind: "completed",
           label: "Completed",
           colorClass: "text-emerald-600",
           dotClass: "bg-emerald-500",
           pulse: false,
         },
         {
+          kind: "plan-ready",
           label: "Plan Ready",
           colorClass: "text-violet-600",
           dotClass: "bg-violet-500",
           pulse: false,
         },
       ]),
-    ).toMatchObject({ label: "Plan Ready", dotClass: "bg-violet-500" });
+    ).toMatchObject({ kind: "plan-ready", dotClass: "bg-violet-500" });
   });
 });
 

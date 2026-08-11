@@ -163,6 +163,7 @@ export type BuildThreadActionItemsThread = Pick<
 export function buildThreadActionItems<TThread extends BuildThreadActionItemsThread>(input: {
   threads: ReadonlyArray<TThread>;
   activeThreadId?: Thread["id"];
+  currentThreadLabel: string;
   projectTitleById: ReadonlyMap<Project["id"], string>;
   sortOrder: SidebarThreadSortOrder;
   icon: ReactNode;
@@ -192,7 +193,7 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
       descriptionParts.push(`#${thread.branch}`);
     }
     if (thread.id === input.activeThreadId) {
-      descriptionParts.push("Current thread");
+      descriptionParts.push(input.currentThreadLabel);
     }
 
     const leadingContent = input.renderLeadingContent?.(thread);
@@ -266,7 +267,9 @@ export function filterCommandPaletteGroups(input: {
   query: string;
   isInSubmenu: boolean;
   projectSearchItems: ReadonlyArray<CommandPaletteActionItem>;
+  projectGroupLabel: string;
   threadSearchItems: ReadonlyArray<CommandPaletteActionItem>;
+  threadGroupLabel: string;
 }): CommandPaletteGroup[] {
   const isActionsFilter = input.query.startsWith(">");
   const searchQuery = isActionsFilter ? input.query.slice(1) : input.query;
@@ -291,14 +294,14 @@ export function filterCommandPaletteGroups(input: {
     if (input.projectSearchItems.length > 0) {
       searchableGroups.push({
         value: "projects-search",
-        label: "Projects",
+        label: input.projectGroupLabel,
         items: input.projectSearchItems,
       });
     }
     if (input.threadSearchItems.length > 0) {
       searchableGroups.push({
         value: "threads-search",
-        label: "Threads",
+        label: input.threadGroupLabel,
         items: input.threadSearchItems,
       });
     }
@@ -331,6 +334,7 @@ export function filterCommandPaletteGroups(input: {
 export function buildBrowseGroups(input: {
   browseEntries: ReadonlyArray<FilesystemBrowseEntry>;
   browseQuery: string;
+  groupLabel: string;
   canBrowseUp: boolean;
   upIcon: ReactNode;
   directoryIcon: ReactNode;
@@ -367,7 +371,7 @@ export function buildBrowseGroups(input: {
     });
   }
 
-  return [{ value: "directories", label: "Directories", items }];
+  return [{ value: "directories", label: input.groupLabel, items }];
 }
 
 export function getCommandPaletteMode(input: {
@@ -381,32 +385,37 @@ export function getCommandPaletteMode(input: {
 }
 
 export function buildRootGroups(input: {
+  actionGroupLabel: string;
   actionItems: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>;
+  recentThreadGroupLabel: string;
   recentThreadItems: ReadonlyArray<CommandPaletteActionItem>;
 }): CommandPaletteGroup[] {
   const groups: CommandPaletteGroup[] = [];
   if (input.actionItems.length > 0) {
-    groups.push({ value: "actions", label: "Actions", items: input.actionItems });
+    groups.push({ value: "actions", label: input.actionGroupLabel, items: input.actionItems });
   }
   if (input.recentThreadItems.length > 0) {
     groups.push({
       value: "recent-threads",
-      label: "Recent Threads",
+      label: input.recentThreadGroupLabel,
       items: input.recentThreadItems,
     });
   }
   return groups;
 }
 
-export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): string {
+export function getCommandPaletteInputPlaceholder(
+  mode: CommandPaletteMode,
+  labels: Readonly<Record<CommandPaletteMode, string>>,
+): string {
   switch (mode) {
     case "root":
-      return "Search commands, projects, and threads...";
+      return labels.root;
     case "root-browse":
-      return "Enter project path (e.g. ~/projects/my-app)";
+      return labels["root-browse"];
     case "submenu":
-      return "Search...";
+      return labels.submenu;
     case "submenu-browse":
-      return "Enter path (e.g. ~/projects/my-app)";
+      return labels["submenu-browse"];
   }
 }

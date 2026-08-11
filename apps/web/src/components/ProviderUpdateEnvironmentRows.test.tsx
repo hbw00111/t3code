@@ -86,6 +86,17 @@ vi.mock("react/compiler-runtime", () => ({
   c: hooks.useMemoCache,
 }));
 
+vi.mock("react-i18next", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-i18next")>();
+  return {
+    ...actual,
+    useTranslation: () => ({
+      t: (key: string) => key,
+      i18n: { language: "en", resolvedLanguage: "en" },
+    }),
+  };
+});
+
 vi.mock("~/state/server", () => ({
   serverEnvironment: { updateProvider: Symbol("updateProvider") },
 }));

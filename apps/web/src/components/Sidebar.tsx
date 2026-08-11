@@ -248,10 +248,6 @@ function WorkingDuration(props: { startedAt: string | null }) {
   );
 }
 
-function terminalProcessLabel(count: number): string {
-  return `${count} terminal ${count === 1 ? "process" : "processes"} running`;
-}
-
 function SidebarThreadTooltip({
   thread,
   projectTitle,
@@ -280,6 +276,8 @@ function SidebarThreadTooltip({
   terminalStatus: TerminalStatusIndicator | null;
   terminalProcessCount: number;
 }) {
+  const { t } = useTranslation();
+
   return (
     <TooltipPopup
       side="right"
@@ -320,7 +318,7 @@ function SidebarThreadTooltip({
             <div className="flex min-w-0 items-start gap-2 text-warning">
               <CircleAlertIcon aria-hidden className="mt-0.5 size-3 shrink-0 stroke-current" />
               <div className="min-w-0 flex-1 wrap-break-word leading-5">
-                You're currently checked out on another branch.
+                {t("sidebar.branchMismatch")}
               </div>
             </div>
           ) : null}
@@ -341,14 +339,14 @@ function SidebarThreadTooltip({
                 className={cn("size-3 shrink-0", terminalStatus.colorClass)}
               />
               <div className="min-w-0 truncate text-foreground/75">
-                {terminalProcessLabel(terminalProcessCount)}
+                {t("sidebar.terminalProcessCount", { count: terminalProcessCount })}
               </div>
             </div>
           ) : null}
           {thread.session?.lastError ? (
             <div className="flex min-w-0 items-center gap-2 text-red-600 dark:text-red-400">
               <CircleAlertIcon className="size-3 shrink-0 stroke-current" />
-              <div className="min-w-0 truncate">Error occurred</div>
+              <div className="min-w-0 truncate">{t("sidebar.errorOccurred")}</div>
             </div>
           ) : null}
         </div>
@@ -452,6 +450,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   onNavigate: (draftId: DraftId) => void;
   onDiscard: (draftId: DraftId) => void;
 }) {
+  const { t } = useTranslation();
   const { composer, draftId, onDiscard, onNavigate, session } = props;
   const promptPreview = composer.prompt.trim().split("\n", 1)[0] ?? "";
   // images mirrors persistedAttachments once rehydration finishes; before
@@ -465,7 +464,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   const preview =
     promptPreview.length > 0
       ? promptPreview
-      : `${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"}`;
+      : t("sidebar.attachmentCount", { count: attachmentCount });
   const handleActivate = useCallback(() => onNavigate(draftId), [draftId, onNavigate]);
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent) => {
@@ -521,8 +520,8 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
             <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-end">
               <button
                 type="button"
-                aria-label="Discard draft"
-                title="Discard draft"
+                aria-label={t("sidebar.discardDraft")}
+                title={t("sidebar.discardDraft")}
                 onClick={handleDiscard}
                 className="pointer-events-none inline-flex cursor-pointer items-center rounded-md bg-transparent px-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100"
               >
@@ -1111,7 +1110,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const terminalStatusIcon = terminalStatus ? (
     <span
       role="img"
-      aria-label={terminalProcessLabel(terminalProcessCount)}
+      aria-label={t("sidebar.terminalProcessCount", { count: terminalProcessCount })}
       data-testid={`sidebar-terminal-status-${thread.id}`}
       className={cn("inline-flex shrink-0 items-center justify-center", terminalStatus.colorClass)}
     >
@@ -1312,8 +1311,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 props.pinningSupported ? (
                   <button
                     type="button"
-                    aria-label="Unpin thread"
-                    title="Unpin thread"
+                    aria-label={t("sidebar.unpinThread")}
+                    title={t("sidebar.unpinThread")}
                     onClick={handleUnpinClick}
                     className="inline-flex cursor-pointer items-center rounded-sm text-muted-foreground/65 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                   >
@@ -2651,7 +2650,7 @@ export default function Sidebar() {
             }),
             timeout: 5_000,
             actionProps: {
-              children: "Undo",
+              children: t("sidebar.undo"),
               onClick: () => attemptUnsnooze(threadRef),
             },
           }),
@@ -2698,6 +2697,12 @@ export default function Sidebar() {
       const titleRegenerationMenuItem = buildBulkTitleRegenerationContextMenuItem({
         supportedCount: titleRegenerationThreads.length,
         actionableCount: regeneratableTitleThreads.length,
+        regenerateLabel: t("sidebar.regenerateTitles", {
+          count: regeneratableTitleThreads.length,
+        }),
+        regeneratingLabel: t("sidebar.regeneratingTitles", {
+          count: titleRegenerationThreads.length,
+        }),
       });
       const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
       const clicked = await settlePromise(() =>
@@ -2759,15 +2764,18 @@ export default function Sidebar() {
                 type: failedCount > 0 ? "warning" : "success",
                 title:
                   failedCount > 0
-                    ? `Snoozed ${snoozedCount} of ${selectedThreads.length} threads`
-                    : `Snoozed ${snoozedCount} thread${snoozedCount === 1 ? "" : "s"}`,
+                    ? t("sidebar.snoozedThreadsPartial", {
+                        count: snoozedCount,
+                        total: selectedThreads.length,
+                      })
+                    : t("sidebar.snoozedThreads", { count: snoozedCount }),
                 description:
                   failedCount > 0
-                    ? `${failedCount} thread${failedCount === 1 ? "" : "s"} couldn't be snoozed.`
+                    ? t("sidebar.snoozePartialFailure", { count: failedCount })
                     : undefined,
                 timeout: 5_000,
                 actionProps: {
-                  children: "Undo",
+                  children: t("sidebar.undo"),
                   onClick: () => {
                     for (const threadRef of snoozedThreadRefs) attemptUnsnooze(threadRef);
                   },
@@ -2839,7 +2847,7 @@ export default function Sidebar() {
           api.dialogs.confirm(
             [
               `${t("sidebar.deleteThread")} (${count})?`,
-              "This permanently clears conversation history for these threads.",
+              t("sidebar.deleteThreadsConfirmation"),
             ].join("\n"),
           ),
         );
@@ -3092,7 +3100,7 @@ export default function Sidebar() {
                 api.dialogs.confirm(
                   [
                     `${t("sidebar.deleteThread")} "${thread.title}"?`,
-                    "This permanently clears conversation history for this thread.",
+                    t("sidebar.deleteThreadConfirmation"),
                   ].join("\n"),
                 ),
               );

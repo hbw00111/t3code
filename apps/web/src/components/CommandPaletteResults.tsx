@@ -69,11 +69,12 @@ function HighlightedSearchText(props: { text: string; query: string }) {
 function ThreadContentMatch(props: {
   match: NonNullable<CommandPaletteActionItem["threadContentMatch"]>;
 }) {
+  const { t } = useTranslation();
   const isUser = props.match.source === "user";
   return (
     <span className="truncate text-xs text-muted-foreground/85">
       <span className={isUser ? "text-blue-400" : "text-emerald-400"}>
-        {isUser ? "You:" : "Agent:"}
+        {isUser ? t("commandPalette.you") : t("commandPalette.agent")}
       </span>{" "}
       <HighlightedSearchText text={props.match.snippet} query={props.match.query} />
     </span>

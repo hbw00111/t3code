@@ -11,6 +11,8 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
+import type { TFunction } from "i18next";
+import { i18n } from "../i18n";
 
 export type ProviderUpdateCandidate = ServerProvider & {
   readonly versionAdvisory: NonNullable<ServerProvider["versionAdvisory"]> & {
@@ -106,27 +108,37 @@ function dedupeProvidersByInstanceId<T extends ServerProvider>(providers: Readon
   return [...latestProviderByInstanceId.values()];
 }
 
-function getProviderUpdatedTitle(provider: Pick<ServerProvider, "driver" | "version">): string {
+function getProviderUpdatedTitle(
+  provider: Pick<ServerProvider, "driver" | "version">,
+  t: TFunction,
+): string {
   const providerName = PROVIDER_DISPLAY_NAMES[provider.driver] ?? provider.driver;
   return provider.version
-    ? `${providerName} updated: ${formatVersion(provider.version)}`
-    : `${providerName} updated`;
+    ? t("providerUpdate.updatedWithVersion", {
+        provider: providerName,
+        version: formatVersion(provider.version),
+      })
+    : t("providerUpdate.updatedNamed", { provider: providerName });
 }
 
-function getProviderUpdatedDescription(providerCount: number): string {
+function getProviderUpdatedDescription(providerCount: number, t: TFunction): string {
   return providerCount === 1
-    ? "New sessions will use the updated provider."
-    : "New sessions will use the updated providers.";
+    ? t("providerUpdate.newSessionsUseUpdatedProvider")
+    : t("providerUpdate.newSessionsUseUpdatedProviders");
 }
 
 function getProviderFailedUpdateTitle(
   provider: Pick<ServerProvider, "driver" | "versionAdvisory">,
+  t: TFunction,
 ): string {
   const providerName = PROVIDER_DISPLAY_NAMES[provider.driver] ?? provider.driver;
   const attemptedVersion = provider.versionAdvisory?.latestVersion;
   return attemptedVersion
-    ? `${providerName} ${formatVersion(attemptedVersion)} update failed`
-    : `${providerName} update failed`;
+    ? t("providerUpdate.failedWithVersion", {
+        provider: providerName,
+        version: formatVersion(attemptedVersion),
+      })
+    : t("providerUpdate.failedNamed", { provider: providerName });
 }
 
 export function isProviderUpdateCandidate(
@@ -206,64 +218,92 @@ export function providerUpdateCandidateKey(provider: ProviderUpdateCandidate): s
   return providerUpdateNotificationKey([provider])!;
 }
 
-export function formatProviderList(providers: ReadonlyArray<Pick<ServerProvider, "driver">>) {
+export function formatProviderList(
+  providers: ReadonlyArray<Pick<ServerProvider, "driver">>,
+  t: TFunction = i18n.t.bind(i18n),
+) {
   const names = providers.map(
     (provider) => PROVIDER_DISPLAY_NAMES[provider.driver] ?? provider.driver,
   );
-  if (names.length <= 2) {
-    return names.join(" and ");
+  if (names.length < 2) {
+    return names[0] ?? "";
   }
-  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+  if (names.length <= 2) {
+    return t("providerUpdate.providerListPair", { first: names[0], second: names[1] });
+  }
+  return t("providerUpdate.providerListMany", {
+    others: names.slice(0, -1).join(t("providerUpdate.providerListSeparator")),
+    last: names[names.length - 1],
+  });
 }
 
-export function getProviderUpdateInitialToastView(input: {
-  readonly updateProviders: ReadonlyArray<ProviderUpdateCandidate>;
-  readonly oneClickProviders: ReadonlyArray<ProviderUpdateCandidate>;
-}): ProviderUpdateToastView {
+export function getProviderUpdateInitialToastView(
+  input: {
+    readonly updateProviders: ReadonlyArray<ProviderUpdateCandidate>;
+    readonly oneClickProviders: ReadonlyArray<ProviderUpdateCandidate>;
+  },
+  t: TFunction = i18n.t.bind(i18n),
+): ProviderUpdateToastView {
   return {
     phase: "initial",
     type: "warning",
-    title: getProviderUpdateInitialToastTitle(input.updateProviders),
+    title: getProviderUpdateInitialToastTitle(input.updateProviders, t),
     description:
       input.oneClickProviders.length > 0
-        ? "Install the update now or review provider settings."
-        : `${formatProviderList(input.updateProviders)} can be updated from provider settings.`,
+        ? t("providerUpdate.installNowOrReviewSettings")
+        : t("providerUpdate.canBeUpdatedFromSettings", {
+            providers: formatProviderList(input.updateProviders, t),
+          }),
   };
 }
 
-export function getProviderUpdateRunningToastView(providerCount: number): ProviderUpdateToastView {
+export function getProviderUpdateRunningToastView(
+  providerCount: number,
+  t: TFunction = i18n.t.bind(i18n),
+): ProviderUpdateToastView {
   return {
     phase: "running",
     type: "loading",
-    title: providerCount === 1 ? "Updating provider" : "Updating providers",
-    description: "Running provider update command.",
+    title:
+      providerCount === 1
+        ? t("providerUpdate.updatingProvider")
+        : t("providerUpdate.updatingProviders"),
+    description: t("providerUpdate.runningCommand"),
   };
 }
 
 export function getProviderUpdateRejectedToastView(
   providerCount: number,
   message: string,
+  t: TFunction = i18n.t.bind(i18n),
 ): ProviderUpdateToastView {
   return {
     phase: "failed",
     type: "error",
-    title: providerCount === 1 ? "Provider update failed" : "Provider updates failed",
+    title:
+      providerCount === 1 ? t("providerUpdate.updateFailed") : t("providerUpdate.updatesFailed"),
     description: message,
   };
 }
 
-export function getProviderUpdateProgressToastView(input: {
-  readonly providers: ReadonlyArray<ServerProvider>;
-  readonly providerCount: number;
-}): ProviderUpdateToastView {
+export function getProviderUpdateProgressToastView(
+  input: {
+    readonly providers: ReadonlyArray<ServerProvider>;
+    readonly providerCount: number;
+  },
+  t: TFunction = i18n.t.bind(i18n),
+): ProviderUpdateToastView {
   const providers = dedupeProvidersByDriver(input.providers);
   const failedProviders = providers.filter((provider) => provider.updateState?.status === "failed");
   if (failedProviders.length > 0) {
     return {
       phase: "failed",
       type: "error",
-      title: failedProviders.length === 1 ? "Provider update failed" : "Provider updates failed",
-      description: getFailedProviderUpdateDescription(failedProviders),
+      title:
+        failedProviders.length === 1
+          ? t("providerUpdate.updateFailed")
+          : t("providerUpdate.updatesFailed"),
+      description: getFailedProviderUpdateDescription(failedProviders, t),
     };
   }
 
@@ -276,16 +316,21 @@ export function getProviderUpdateProgressToastView(input: {
       type: "warning",
       title:
         unchangedProviders.length === 1
-          ? "Provider still needs an update"
-          : "Providers still need updates",
-      description: `${formatProviderList(unchangedProviders)} ${
-        unchangedProviders.length === 1 ? "still appears" : "still appear"
-      } outdated. Check provider settings for details.`,
+          ? t("providerUpdate.stillNeedsUpdate")
+          : t("providerUpdate.stillNeedUpdates"),
+      description:
+        unchangedProviders.length === 1
+          ? t("providerUpdate.outdatedCheckSingle", {
+              providers: formatProviderList(unchangedProviders, t),
+            })
+          : t("providerUpdate.outdatedCheckMultiple", {
+              providers: formatProviderList(unchangedProviders, t),
+            }),
     };
   }
 
   if (providers.some(isProviderUpdateActive)) {
-    return getProviderUpdateRunningToastView(input.providerCount);
+    return getProviderUpdateRunningToastView(input.providerCount, t);
   }
 
   const hasCompleteProviderSnapshots = providers.length >= input.providerCount;
@@ -299,44 +344,51 @@ export function getProviderUpdateProgressToastView(input: {
     return {
       phase: "succeeded",
       type: "success",
-      title: input.providerCount === 1 ? "Provider updated" : "Provider updates finished",
-      description: getProviderUpdatedDescription(input.providerCount),
+      title:
+        input.providerCount === 1
+          ? t("providerUpdate.providerUpdated")
+          : t("providerUpdate.updatesFinished"),
+      description: getProviderUpdatedDescription(input.providerCount, t),
       dismissAfterVisibleMs: PROVIDER_UPDATE_SUCCESS_VISIBLE_MS,
     };
   }
 
-  return getProviderUpdateRunningToastView(input.providerCount);
+  return getProviderUpdateRunningToastView(input.providerCount, t);
 }
 
 export function getSingleProviderUpdateProgressToastView(
   provider: ServerProvider,
+  t: TFunction = i18n.t.bind(i18n),
 ): ProviderUpdateToastView {
-  const view = getProviderUpdateProgressToastView({
-    providers: [provider],
-    providerCount: 1,
-  });
+  const view = getProviderUpdateProgressToastView(
+    {
+      providers: [provider],
+      providerCount: 1,
+    },
+    t,
+  );
   const providerName = PROVIDER_DISPLAY_NAMES[provider.driver] ?? provider.driver;
 
   switch (view.phase) {
     case "running":
       return {
         ...view,
-        title: `Updating ${providerName}`,
+        title: t("providerUpdate.updatingNamed", { provider: providerName }),
       };
     case "failed":
       return {
         ...view,
-        title: getProviderFailedUpdateTitle(provider),
+        title: getProviderFailedUpdateTitle(provider, t),
       };
     case "unchanged":
       return {
         ...view,
-        title: `${providerName} still needs an update`,
+        title: t("providerUpdate.namedStillNeedsUpdate", { provider: providerName }),
       };
     case "succeeded":
       return {
         ...view,
-        title: getProviderUpdatedTitle(provider),
+        title: getProviderUpdatedTitle(provider, t),
       };
     default:
       return view;
@@ -367,13 +419,14 @@ export function collectUpdatedProviderSnapshots(input: {
 
 export function firstFailedProviderUpdateMessage(
   results: ReadonlyArray<AtomCommandResult<unknown, unknown>>,
+  t: TFunction = i18n.t.bind(i18n),
 ): string | null {
   const failed = results.find((result) => result._tag === "Failure");
   if (!failed || failed._tag !== "Failure") {
     return null;
   }
   const error = squashAtomCommandFailure(failed);
-  return error instanceof Error ? error.message : "Provider update failed.";
+  return error instanceof Error ? error.message : t("providerUpdate.updateFailedSentence");
 }
 
 function getUpdateFinishedAt(provider: ServerProvider): string | null {
@@ -408,6 +461,7 @@ function latestFinishedAtForProviders(providers: ReadonlyArray<ServerProvider>):
 export function getProviderUpdateSidebarPillView(
   providers: ReadonlyArray<ServerProvider>,
   options?: ProviderUpdateSidebarPillOptions,
+  t: TFunction = i18n.t.bind(i18n),
 ): ProviderUpdateSidebarPillView | null {
   const dedupedProviders = dedupeProvidersByDriver(providers);
   const activeProviders = dedupedProviders.filter(isProviderUpdateActive);
@@ -423,12 +477,16 @@ export function getProviderUpdateSidebarPillView(
       tone: "loading",
       title:
         activeProviders.length === 1
-          ? `Updating ${activeProviderName}`
-          : `Updating ${activeProviders.length} providers`,
+          ? t("providerUpdate.updatingNamed", { provider: activeProviderName })
+          : t("providerUpdate.updatingCount", { count: activeProviders.length }),
       description:
         activeProviders.length === 1
-          ? `${formatProviderList(activeProviders)} update in progress.`
-          : `${formatProviderList(activeProviders)} updates are in progress.`,
+          ? t("providerUpdate.inProgressSingle", {
+              providers: formatProviderList(activeProviders, t),
+            })
+          : t("providerUpdate.inProgressMultiple", {
+              providers: formatProviderList(activeProviders, t),
+            }),
     };
   }
 
@@ -453,9 +511,9 @@ export function getProviderUpdateSidebarPillView(
       tone: "error",
       title:
         failedProviders.length === 1
-          ? getProviderFailedUpdateTitle(failedProvider)
-          : `${failedProviders.length} provider updates failed`,
-      description: getFailedProviderUpdateDescription(failedProviders),
+          ? getProviderFailedUpdateTitle(failedProvider, t)
+          : t("providerUpdate.countUpdatesFailed", { count: failedProviders.length }),
+      description: getFailedProviderUpdateDescription(failedProviders, t),
       dismissible: true,
     });
   }
@@ -478,11 +536,16 @@ export function getProviderUpdateSidebarPillView(
       tone: "warning",
       title:
         unchangedProviders.length === 1
-          ? `${unchangedProviderName} still needs an update`
-          : `${unchangedProviders.length} providers still need updates`,
-      description: `${formatProviderList(unchangedProviders)} ${
-        unchangedProviders.length === 1 ? "still appears" : "still appear"
-      } outdated. Review provider settings for details.`,
+          ? t("providerUpdate.namedStillNeedsUpdate", { provider: unchangedProviderName })
+          : t("providerUpdate.countStillNeedUpdates", { count: unchangedProviders.length }),
+      description:
+        unchangedProviders.length === 1
+          ? t("providerUpdate.outdatedReviewSingle", {
+              providers: formatProviderList(unchangedProviders, t),
+            })
+          : t("providerUpdate.outdatedReviewMultiple", {
+              providers: formatProviderList(unchangedProviders, t),
+            }),
       dismissible: true,
     });
   }
@@ -503,9 +566,9 @@ export function getProviderUpdateSidebarPillView(
       tone: "success",
       title:
         succeededProviders.length === 1
-          ? getProviderUpdatedTitle(succeededProvider)
-          : `${succeededProviders.length} providers updated`,
-      description: getProviderUpdatedDescription(succeededProviders.length),
+          ? getProviderUpdatedTitle(succeededProvider, t)
+          : t("providerUpdate.countUpdated", { count: succeededProviders.length }),
+      description: getProviderUpdatedDescription(succeededProviders.length, t),
       dismissAfterVisibleMs: PROVIDER_UPDATE_SUCCESS_VISIBLE_MS,
     });
   }
@@ -535,23 +598,44 @@ export function getProviderUpdateSidebarPillView(
 
 function getProviderUpdateInitialToastTitle(
   providers: ReadonlyArray<ProviderUpdateCandidate>,
+  t: TFunction,
 ): string {
   if (providers.length === 1) {
     const provider = providers[0]!;
     const providerName = PROVIDER_DISPLAY_NAMES[provider.driver] ?? provider.driver;
-    return `Update Available: ${providerName} ${formatVersion(provider.versionAdvisory.latestVersion)}`;
+    return t("providerUpdate.availableNamed", {
+      provider: providerName,
+      version: formatVersion(provider.versionAdvisory.latestVersion),
+    });
   }
-  return `Updates Available: ${providers.length} providers`;
+  return t("providerUpdate.availableCount", { count: providers.length });
 }
 
-function getFailedProviderUpdateDescription(providers: ReadonlyArray<ServerProvider>): string {
+function getFailedProviderUpdateDescription(
+  providers: ReadonlyArray<ServerProvider>,
+  t: TFunction,
+): string {
   if (providers.length === 1) {
     const provider = providers[0]!;
     if (provider.updateState?.message) {
-      return provider.updateState.message;
+      const message = provider.updateState.message;
+      if (message === "Update timed out.") {
+        return t("providerUpdate.updateCommandTimedOut");
+      }
+      const exitedWithCode = /^Update command exited with code (-?\d+)\.$/.exec(message);
+      if (exitedWithCode) {
+        return t("providerUpdate.updateCommandExited", { code: exitedWithCode[1] });
+      }
+      if (message === "Update command failed.") {
+        return t("providerUpdate.updateCommandFailed");
+      }
+      if (message === "Update command failed to run.") {
+        return t("providerUpdate.updateCommandFailedToRun");
+      }
+      return message;
     }
   }
-  return `${formatProviderList(providers)} failed to update. Check provider settings for details.`;
+  return t("providerUpdate.failedToUpdate", { providers: formatProviderList(providers, t) });
 }
 
 // ===========================================================================
@@ -595,12 +679,15 @@ function providerUpdateOutcomeSeverity(provider: ServerProvider): number {
 
 export function firstRejectedProviderUpdateMessage(
   results: ReadonlyArray<PromiseSettledResult<unknown>>,
+  t: TFunction = i18n.t.bind(i18n),
 ): string | null {
   const rejected = results.find((result) => result.status === "rejected");
   if (!rejected) {
     return null;
   }
-  return rejected.reason instanceof Error ? rejected.reason.message : "Provider update failed.";
+  return rejected.reason instanceof Error
+    ? rejected.reason.message
+    : t("providerUpdate.updateFailedSentence");
 }
 
 /**
@@ -792,20 +879,23 @@ function environmentProviderNames(group: LocalEnvironmentUpdateGroup): string {
  * than treated as authoritative, so live server state can still drive the row
  * to its terminal status instead of pinning it on "Updating…".
  */
-export function resolveEnvironmentUpdateRowStatus(input: {
-  readonly group: LocalEnvironmentUpdateGroup;
-  readonly error: string | undefined;
-  readonly result: ProviderUpdateToastView | undefined;
-  readonly pill: ProviderUpdateSidebarPillView | null;
-  readonly isPending: boolean;
-}): ProviderUpdateRowStatus {
+export function resolveEnvironmentUpdateRowStatus(
+  input: {
+    readonly group: LocalEnvironmentUpdateGroup;
+    readonly error: string | undefined;
+    readonly result: ProviderUpdateToastView | undefined;
+    readonly pill: ProviderUpdateSidebarPillView | null;
+    readonly isPending: boolean;
+  },
+  t: TFunction = i18n.t.bind(i18n),
+): ProviderUpdateRowStatus {
   if (input.error) {
     return { kind: "failed", text: input.error };
   }
   if (input.result) {
     switch (input.result.phase) {
       case "succeeded":
-        return { kind: "success", text: "Updated" };
+        return { kind: "success", text: t("providerUpdate.updatedStatus") };
       case "failed":
         return { kind: "failed", text: input.result.description };
       case "unchanged":
@@ -816,20 +906,20 @@ export function resolveEnvironmentUpdateRowStatus(input: {
   if (input.pill) {
     switch (input.pill.tone) {
       case "success":
-        return { kind: "success", text: "Updated" };
+        return { kind: "success", text: t("providerUpdate.updatedStatus") };
       case "error":
         return { kind: "failed", text: input.pill.description };
       case "warning":
         return { kind: "unchanged", text: input.pill.description };
       default:
-        return { kind: "loading", text: "Updating…" };
+        return { kind: "loading", text: t("providerUpdate.updatingStatus") };
     }
   }
   // A non-terminal result snapshot or the optimistic pending flag means an
   // update is still in flight — keep showing the spinner rather than reverting
   // to the Update button as if nothing happened.
   if (input.result || input.isPending) {
-    return { kind: "loading", text: "Updating…" };
+    return { kind: "loading", text: t("providerUpdate.updatingStatus") };
   }
   return { kind: "idle", text: environmentProviderNames(input.group) };
 }

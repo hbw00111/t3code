@@ -6,6 +6,7 @@ import {
 import type { VcsStatusResult } from "@t3tools/contracts";
 import { CloudIcon, FolderGit2Icon, GitPullRequestIcon, TerminalIcon } from "lucide-react";
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
 import { useProject } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
@@ -32,6 +33,16 @@ export interface TerminalStatusIndicator {
   colorClass: string;
   pulse: boolean;
 }
+
+const THREAD_STATUS_LABEL_KEYS = {
+  "pending-approval": "sidebar.approval",
+  "awaiting-input": "sidebar.inputNeeded",
+  working: "sidebar.working",
+  connecting: "sidebar.connecting",
+  "plan-ready": "sidebar.planReady",
+  monitoring: "sidebar.monitoring",
+  completed: "sidebar.done",
+} as const satisfies Record<ThreadStatusPill["kind"], string>;
 
 export type ThreadPr = VcsStatusResult["pr"];
 
@@ -180,13 +191,16 @@ export function ThreadStatusLabel({
   status: ThreadStatusPill;
   compact?: boolean;
 }) {
+  const { t } = useTranslation();
+  const label = t(THREAD_STATUS_LABEL_KEYS[status.kind]);
+
   if (compact) {
     return (
       <Tooltip>
         <TooltipTrigger
           render={
             <span
-              aria-label={status.label}
+              aria-label={label}
               className={`inline-flex size-3.5 shrink-0 items-center justify-center ${status.colorClass}`}
             />
           }
@@ -197,7 +211,7 @@ export function ThreadStatusLabel({
             }`}
           />
         </TooltipTrigger>
-        <TooltipPopup side="top">{status.label}</TooltipPopup>
+        <TooltipPopup side="top">{label}</TooltipPopup>
       </Tooltip>
     );
   }
@@ -207,7 +221,7 @@ export function ThreadStatusLabel({
       <TooltipTrigger
         render={
           <span
-            aria-label={status.label}
+            aria-label={label}
             className={`inline-flex items-center gap-1 text-[10px] ${status.colorClass}`}
           />
         }
@@ -217,9 +231,9 @@ export function ThreadStatusLabel({
             status.pulse ? "animate-status-pulse" : ""
           }`}
         />
-        <span className="hidden md:inline">{status.label}</span>
+        <span className="hidden md:inline">{label}</span>
       </TooltipTrigger>
-      <TooltipPopup side="top">{status.label}</TooltipPopup>
+      <TooltipPopup side="top">{label}</TooltipPopup>
     </Tooltip>
   );
 }
@@ -296,6 +310,7 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
  * environment indicator, matching the sidebar's trailing indicators.
  */
 export function ThreadRowTrailingStatus({ thread }: { thread: SidebarThreadSummary }) {
+  const { t } = useTranslation();
   const runningTerminalIds = useThreadRunningTerminalIds({
     environmentId: thread.environmentId,
     threadId: thread.id,
@@ -307,6 +322,7 @@ export function ThreadRowTrailingStatus({ thread }: { thread: SidebarThreadSumma
   const remoteEnvLabel = environment?.label ?? null;
   const threadEnvironmentLabel = isRemoteThread ? (remoteEnvLabel ?? "Remote") : null;
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
+  const terminalStatusLabel = t("sidebar.terminalProcessRunning");
 
   if (!terminalStatus && !isRemoteThread) {
     return null;
@@ -320,7 +336,7 @@ export function ThreadRowTrailingStatus({ thread }: { thread: SidebarThreadSumma
             render={
               <span
                 role="img"
-                aria-label={terminalStatus.label}
+                aria-label={terminalStatusLabel}
                 className={`inline-flex items-center justify-center ${terminalStatus.colorClass}`}
               />
             }
@@ -329,7 +345,7 @@ export function ThreadRowTrailingStatus({ thread }: { thread: SidebarThreadSumma
               className={`size-3 ${terminalStatus.pulse ? "animate-status-pulse" : ""}`}
             />
           </TooltipTrigger>
-          <TooltipPopup side="top">{terminalStatus.label}</TooltipPopup>
+          <TooltipPopup side="top">{terminalStatusLabel}</TooltipPopup>
         </Tooltip>
       ) : null}
       {isRemoteThread ? (

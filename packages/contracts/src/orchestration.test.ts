@@ -19,6 +19,7 @@ import {
   OrchestrationThreadShell,
   ProjectCreateCommand,
   ThreadMetaUpdatedPayload,
+  ThreadGoalActivityPayload,
   ThreadTurnStartCommand,
   ThreadCreatedPayload,
   ThreadTurnDiff,
@@ -53,6 +54,7 @@ const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPaylo
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
+const decodeThreadGoalActivityPayload = Schema.decodeUnknownEffect(ThreadGoalActivityPayload);
 
 it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
   Effect.gen(function* () {
@@ -291,6 +293,75 @@ it.effect("accepts bootstrap metadata in thread.turn.start", () =>
     assert.strictEqual(parsed.bootstrap?.prepareWorktree?.baseBranch, "main");
     assert.strictEqual(parsed.bootstrap?.prepareWorktree?.startFromOrigin, true);
     assert.strictEqual(parsed.bootstrap?.runSetupScript, true);
+  }),
+);
+
+it.effect("decodes native thread goal commands and requires a set objective", () =>
+  Effect.gen(function* () {
+    const set = yield* decodeOrchestrationCommand({
+      type: "thread.goal.set",
+      commandId: "cmd-goal-set",
+      threadId: "thread-1",
+      objective: "Finish the migration",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    const pause = yield* decodeOrchestrationCommand({
+      type: "thread.goal.pause",
+      commandId: "cmd-goal-pause",
+      threadId: "thread-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    const resume = yield* decodeOrchestrationCommand({
+      type: "thread.goal.resume",
+      commandId: "cmd-goal-resume",
+      threadId: "thread-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    const clear = yield* decodeOrchestrationCommand({
+      type: "thread.goal.clear",
+      commandId: "cmd-goal-clear",
+      threadId: "thread-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(set.type, "thread.goal.set");
+    if (set.type === "thread.goal.set") {
+      assert.strictEqual(set.objective, "Finish the migration");
+    }
+    assert.strictEqual(pause.type, "thread.goal.pause");
+    assert.strictEqual(resume.type, "thread.goal.resume");
+    assert.strictEqual(clear.type, "thread.goal.clear");
+
+    const missingObjective = yield* Effect.exit(
+      decodeOrchestrationCommand({
+        type: "thread.goal.set",
+        commandId: "cmd-goal-invalid",
+        threadId: "thread-1",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    assert.strictEqual(missingObjective._tag, "Failure");
+  }),
+);
+
+it.effect("decodes correlated thread goal activity payloads", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadGoalActivityPayload({
+      commandId: "cmd-goal-set",
+      operation: "set",
+      objective: "Finish the migration",
+    });
+    assert.strictEqual(parsed.commandId, "cmd-goal-set");
+    assert.strictEqual(parsed.operation, "set");
+    assert.strictEqual(parsed.objective, "Finish the migration");
+
+    const invalid = yield* Effect.exit(
+      decodeThreadGoalActivityPayload({
+        commandId: "cmd-goal-set",
+        operation: "stop",
+      }),
+    );
+    assert.strictEqual(invalid._tag, "Failure");
   }),
 );
 
