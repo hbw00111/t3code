@@ -1060,6 +1060,69 @@ const make = Effect.gen(function* () {
       { discard: true },
     );
   });
+  const reconcileOrphanedProviderSessions = Effect.fn("reconcileOrphanedProviderSessions")(
+    function* () {
+      const [readModel, runtimeSessions] = yield* Effect.all([
+        projectionSnapshotQuery.getCommandReadModel(),
+        providerService.listSessions(),
+      ]);
+      const runtimeSessionByThreadId = new Map(
+        runtimeSessions.map((session) => [session.threadId, session]),
+      );
+      const orphanedSessions = readModel.threads.flatMap((thread) => {
+        const session = thread.session;
+        if (session === null || (session.status !== "starting" && session.status !== "running")) {
+          return [];
+        }
+        const runtimeSession = runtimeSessionByThreadId.get(thread.id);
+        const runtimeStillOwnsWork =
+          session.status === "starting"
+            ? runtimeSession?.status === "connecting"
+            : runtimeSession?.status === "running" &&
+              (runtimeSession.activeTurnId ?? null) === session.activeTurnId;
+        if (runtimeStillOwnsWork) {
+          return [];
+        }
+        return [{ threadId: thread.id, session }];
+      });
+      if (orphanedSessions.length === 0) {
+        return;
+      }
+
+      const updatedAt = DateTime.formatIso(yield* DateTime.now);
+      yield* Effect.forEach(
+        orphanedSessions,
+        ({ threadId, session }) =>
+          setThreadSession({
+            threadId,
+            session: {
+              ...session,
+              status: "interrupted",
+              activeTurnId: null,
+              updatedAt,
+            },
+            createdAt: updatedAt,
+          }).pipe(
+            Effect.catchCause((cause) => {
+              if (Cause.hasInterruptsOnly(cause)) {
+                return Effect.interrupt;
+              }
+              return Effect.logWarning(
+                "provider command reactor failed to interrupt orphaned provider session",
+                {
+                  threadId,
+                  cause: Cause.pretty(cause),
+                },
+              );
+            }),
+          ),
+        { discard: true },
+      );
+      yield* Effect.logInfo("provider command reactor interrupted orphaned provider sessions", {
+        count: orphanedSessions.length,
+      });
+    },
+  );
   const processThreadTitleRegenerationSafely = Effect.fn("processThreadTitleRegenerationSafely")(
     function* (event: Extract<ProviderIntentEvent, { type: "thread.meta-updated" }>) {
       if (event.payload.regenerateTitle !== true) {
@@ -1493,18 +1556,24 @@ const make = Effect.gen(function* () {
 
   const worker = yield* makeDrainableWorker(processDomainEventSafely);
 
+  const reconcileStartup: ProviderCommandReactorShape["reconcileStartup"] = Effect.gen(
+    function* () {
+      const interruptedTitleRegenerations = yield* findInterruptedThreadTitleRegenerations();
+      yield* clearInterruptedThreadTitleRegenerations(interruptedTitleRegenerations);
+      yield* reconcileOrphanedProviderSessions();
+    },
+  ).pipe(
+    Effect.catchCause((cause) => {
+      if (Cause.hasInterruptsOnly(cause)) {
+        return Effect.interrupt;
+      }
+      return Effect.logWarning("provider command reactor startup reconciliation failed", {
+        cause: Cause.pretty(cause),
+      });
+    }),
+  );
+
   const start: ProviderCommandReactorShape["start"] = Effect.fn("start")(function* () {
-    const interruptedTitleRegenerations = yield* findInterruptedThreadTitleRegenerations().pipe(
-      Effect.catchCause((cause) => {
-        if (Cause.hasInterruptsOnly(cause)) {
-          return Effect.interrupt;
-        }
-        return Effect.logWarning(
-          "provider command reactor failed to find interrupted title regenerations",
-          { cause: Cause.pretty(cause) },
-        ).pipe(Effect.as([]));
-      }),
-    );
     const processEvent = Effect.fn("processEvent")(function* (event: OrchestrationEvent) {
       if (
         (event.type === "thread.meta-updated" && event.payload.regenerateTitle === true) ||
@@ -1522,34 +1591,18 @@ const make = Effect.gen(function* () {
 
     yield* forkParked(Stream.runForEach(orchestrationEngine.streamDomainEvents, processEvent));
 
-    // The domain event stream is hot, so work pending before this reactor
-    // starts cannot be resumed. Correlated completions only clear the request
-    // captured here, leaving any newer request untouched.
-    const clearInterrupted = clearInterruptedThreadTitleRegenerations(
-      interruptedTitleRegenerations,
-    ).pipe(
-      Effect.catchCause((cause) => {
-        if (Cause.hasInterruptsOnly(cause)) {
-          return Effect.interrupt;
-        }
-        return Effect.logWarning(
-          "provider command reactor failed to clear interrupted title regenerations",
-          {
-            cause: Cause.pretty(cause),
-          },
-        );
-      }),
-    );
+    // Tests and embedded runtimes without an activation gate reconcile here.
+    // Production calls reconcileStartup after takeover and before opening the
+    // command gate, so a prepared replacement cannot mutate shared state.
     const activation = yield* ServerActivation;
     if (activation === undefined) {
-      yield* clearInterrupted;
-    } else {
-      yield* forkParked(clearInterrupted);
+      yield* reconcileStartup;
     }
   });
 
   return {
     start,
+    reconcileStartup,
     drain: Effect.gen(function* () {
       yield* worker.drain;
       yield* threadTitleRegenerationWorker.drain;

@@ -163,6 +163,17 @@ export const launchStartupHeartbeat = recordStartupHeartbeat.pipe(
   Effect.asVoid,
 );
 
+export const activateAndReconcileRuntime = (input: {
+  readonly activate: Effect.Effect<void>;
+  readonly reconcileStartup: Effect.Effect<void>;
+  readonly signalCommandReady: Effect.Effect<void>;
+}) =>
+  Effect.gen(function* () {
+    yield* input.activate;
+    yield* input.reconcileStartup;
+    yield* input.signalCommandReady;
+  });
+
 export const getAutoBootstrapDefaultModelSelection = (): ModelSelection => ({
   instanceId: ProviderInstanceId.make("codex"),
   model: DEFAULT_MODEL,
@@ -442,10 +453,12 @@ export const make = (options?: StartupOptions) =>
           payload: { environment, ...welcomeBase },
         }),
       );
-      yield* options?.activate ?? Effect.void;
-
+      yield* activateAndReconcileRuntime({
+        activate: options?.activate ?? Effect.void,
+        reconcileStartup: orchestrationReactor.reconcileStartup,
+        signalCommandReady: commandGate.signalCommandReady,
+      });
       yield* Effect.logDebug("Accepting commands");
-      yield* commandGate.signalCommandReady;
       yield* runStartupPhase(
         "ready.publish",
         lifecycleEvents.publish({

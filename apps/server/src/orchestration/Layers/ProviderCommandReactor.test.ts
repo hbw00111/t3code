@@ -152,6 +152,7 @@ describe("ProviderCommandReactor", () => {
     readonly requiresNewThreadForModelChange?: boolean;
     readonly titleRegenerationCompletionDispatchFailures?: number;
     readonly titleRegenerationBeforeStart?: "one" | "two";
+    readonly runningTurnBeforeStart?: "orphaned" | "live";
     readonly useTestClock?: boolean;
     readonly startSessionEffect?: (
       session: ProviderSession,
@@ -458,6 +459,39 @@ describe("ProviderCommandReactor", () => {
         createdAt: now,
       }),
     );
+    if (input?.runningTurnBeforeStart !== undefined) {
+      const activeTurnId = asTurnId("turn-running-before-reactor-start");
+      await Effect.runPromise(
+        engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make("cmd-session-running-before-reactor-start"),
+          threadId: ThreadId.make("thread-1"),
+          session: {
+            threadId: ThreadId.make("thread-1"),
+            status: "running",
+            providerName: "codex",
+            providerInstanceId: modelSelection.instanceId,
+            runtimeMode: "approval-required",
+            activeTurnId,
+            lastError: null,
+            updatedAt: now,
+          },
+          createdAt: now,
+        }),
+      );
+      if (input.runningTurnBeforeStart === "live") {
+        runtimeSessions.push({
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: modelSelection.instanceId,
+          status: "running",
+          runtimeMode: "approval-required",
+          threadId: ThreadId.make("thread-1"),
+          activeTurnId,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    }
     if (input?.titleRegenerationBeforeStart === "two") {
       await Effect.runPromise(
         engine.dispatch({
@@ -1363,6 +1397,40 @@ describe("ProviderCommandReactor", () => {
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.title).toBe("Thread");
     expect(thread?.titleRegeneration).toBeNull();
+  });
+
+  it("interrupts a projected running turn that has no live provider session after restart", async () => {
+    const harness = await createHarness({
+      runningTurnBeforeStart: "orphaned",
+    });
+
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(thread?.session).toMatchObject({
+      status: "interrupted",
+      activeTurnId: null,
+    });
+    expect(thread?.latestTurn).toMatchObject({
+      turnId: asTurnId("turn-running-before-reactor-start"),
+      state: "interrupted",
+    });
+  });
+
+  it("preserves a projected running turn that matches a live provider session", async () => {
+    const harness = await createHarness({
+      runningTurnBeforeStart: "live",
+    });
+
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(thread?.session).toMatchObject({
+      status: "running",
+      activeTurnId: asTurnId("turn-running-before-reactor-start"),
+    });
+    expect(thread?.latestTurn).toMatchObject({
+      turnId: asTurnId("turn-running-before-reactor-start"),
+      state: "running",
+    });
   });
 
   it("continues clearing startup title regeneration state after one completion fails", async () => {

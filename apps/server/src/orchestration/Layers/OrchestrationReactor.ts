@@ -26,8 +26,12 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
     yield* agentAwarenessRelay.start();
   });
 
+  const reconcileStartup: OrchestrationReactorShape["reconcileStartup"] =
+    providerCommandReactor.reconcileStartup;
+
   return {
     start,
+    reconcileStartup,
   } satisfies OrchestrationReactorShape;
 });
 

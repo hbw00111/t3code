@@ -2261,12 +2261,17 @@ function ChatViewContent(props: ChatViewProps) {
   // until orchestration-v2 lands (source precedence lives in the derive).
   // sessionLive derives interruption for agents orphaned by session death.
   const agentSessionLive = phase !== "disconnected";
+  const agentTurnId =
+    activeThread?.session?.status === "running" ? activeThread.session.activeTurnId : null;
   const agentPanelModel = useMemo(
     () =>
       deriveAgentPanelModel({
-        agents: foldSubagentActivities(threadActivities, { sessionLive: agentSessionLive }),
+        agents: foldSubagentActivities(threadActivities, {
+          sessionLive: agentSessionLive,
+          activeTurnId: agentTurnId,
+        }),
       }),
-    [agentSessionLive, threadActivities],
+    [agentSessionLive, agentTurnId, threadActivities],
   );
   const pendingApprovals = useMemo(
     () => derivePendingApprovals(threadActivities),

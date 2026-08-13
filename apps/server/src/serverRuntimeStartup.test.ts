@@ -45,6 +45,21 @@ it.effect("enqueueCommand waits for readiness and then drains queued work", () =
   ),
 );
 
+it.effect("reconciles interrupted runtime state before opening the command gate", () =>
+  Effect.gen(function* () {
+    const phases = yield* Ref.make<ReadonlyArray<string>>([]);
+    const mark = (phase: string) => Ref.update(phases, (current) => [...current, phase]);
+
+    yield* ServerRuntimeStartup.activateAndReconcileRuntime({
+      activate: mark("activate"),
+      reconcileStartup: mark("reconcile"),
+      signalCommandReady: mark("ready"),
+    });
+
+    assert.deepStrictEqual(yield* Ref.get(phases), ["activate", "reconcile", "ready"]);
+  }),
+);
+
 it.effect("enqueueCommand fails queued work when readiness fails", () =>
   Effect.scoped(
     Effect.gen(function* () {

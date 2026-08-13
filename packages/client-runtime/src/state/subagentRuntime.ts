@@ -570,11 +570,20 @@ function asRuntimeStatus(value: unknown): RuntimeSubagentStatus | undefined {
  */
 export function foldSubagentActivities(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
-  options?: { readonly sessionLive?: boolean },
+  options?: {
+    readonly sessionLive?: boolean;
+    readonly activeTurnId?: OrchestrationThreadActivity["turnId"];
+  },
 ): ReadonlyArray<RuntimeSubagent> {
+  if (options?.activeTurnId === null) {
+    return [];
+  }
   const agents = new Map<string, MutableAgent>();
 
   for (const activity of activities) {
+    if (options?.activeTurnId !== undefined && activity.turnId !== options.activeTurnId) {
+      continue;
+    }
     if (typeof activity.payload !== "object" || activity.payload === null) {
       continue;
     }

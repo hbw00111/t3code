@@ -21,6 +21,9 @@ export interface OrchestrationReactorShape {
    * finalized on shutdown.
    */
   readonly start: () => Effect.Effect<void, never, Scope.Scope>;
+
+  /** Finish startup reconciliation before the server accepts commands. */
+  readonly reconcileStartup: Effect.Effect<void>;
 }
 
 /**

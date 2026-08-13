@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
-import { classifyTaskAgentKind, type OrchestrationThreadActivity } from "@t3tools/contracts";
+import {
+  classifyTaskAgentKind,
+  type OrchestrationThreadActivity,
+  TurnId,
+} from "@t3tools/contracts";
 import {
   deriveAgentPanelModel,
   foldSubagentActivities,
@@ -939,6 +943,34 @@ describe("session-derived interruption", () => {
     expect(dead.find((agent) => agent.id === "done-1")?.status).toBe("completed");
     const alive = foldSubagentActivities(rows, { sessionLive: true });
     expect(alive.find((agent) => agent.id === "live-1")?.status).toBe("running");
+  });
+});
+
+describe("active-turn roster", () => {
+  it("shows only the active turn's agents and clears them when the parent turn settles", () => {
+    const previousTurnId = TurnId.make("turn-previous");
+    const activeTurnId = TurnId.make("turn-active");
+    const rows = [
+      {
+        ...activity("task.started", {
+          taskId: "previous-agent",
+          taskType: "local_agent",
+        }),
+        turnId: previousTurnId,
+      },
+      {
+        ...activity("task.started", {
+          taskId: "active-agent",
+          taskType: "local_agent",
+        }),
+        turnId: activeTurnId,
+      },
+    ];
+
+    expect(
+      foldSubagentActivities(rows, { sessionLive: true, activeTurnId }).map((agent) => agent.id),
+    ).toEqual(["active-agent"]);
+    expect(foldSubagentActivities(rows, { sessionLive: true, activeTurnId: null })).toEqual([]);
   });
 });
 

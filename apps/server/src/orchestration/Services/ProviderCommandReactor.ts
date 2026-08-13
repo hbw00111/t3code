@@ -25,6 +25,9 @@ export interface ProviderCommandReactorShape {
    */
   readonly start: () => Effect.Effect<void, never, Scope.Scope>;
 
+  /** Reconcile persisted work that cannot survive a server process restart. */
+  readonly reconcileStartup: Effect.Effect<void>;
+
   /**
    * Resolves when the internal processing queue is empty and idle.
    * Intended for test use to replace timing-sensitive sleeps.
