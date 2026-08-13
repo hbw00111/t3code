@@ -98,6 +98,7 @@ export function buildLocalDraftThread(
     archivedAt: null,
     settledOverride: null,
     settledAt: null,
+    goal: null,
     deletedAt: null,
     latestTurn: null,
     branch: draftThread.branch,
@@ -111,6 +112,7 @@ export function buildLocalDraftThread(
 export function buildLoadingThreadFromShell(shell: ThreadShell): Thread {
   return {
     ...shell,
+    goal: null,
     messages: [],
     proposedPlans: [],
     activities: [],

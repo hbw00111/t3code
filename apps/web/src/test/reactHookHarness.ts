@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from "react";
+import type { DependencyList, Dispatch, EffectCallback, SetStateAction } from "react";
 
 /**
  * Minimal React hook shim for tests that call components as plain functions
@@ -38,6 +38,14 @@ export function createReactHookHarness() {
   let cursor = 0;
   let slots: unknown[] = [];
   const nextIndex = () => cursor++;
+  const dependenciesChanged = (
+    previous: DependencyList | undefined,
+    next: DependencyList | undefined,
+  ) =>
+    next === undefined ||
+    previous === undefined ||
+    previous.length !== next.length ||
+    previous.some((value, index) => !Object.is(value, next[index]));
 
   return {
     beginRender() {
@@ -47,6 +55,21 @@ export function createReactHookHarness() {
       cursor = 0;
       slots = [];
     },
+    flushEffects() {
+      for (const slot of slots) {
+        const effectSlot = slot as
+          | {
+              cleanup?: void | (() => void);
+              effect?: EffectCallback;
+              pending?: boolean;
+            }
+          | undefined;
+        if (!effectSlot?.pending || !effectSlot.effect) continue;
+        effectSlot.pending = false;
+        effectSlot.cleanup?.();
+        effectSlot.cleanup = effectSlot.effect();
+      }
+    },
     useCallback<T>(callback: T): T {
       nextIndex();
       return callback;
@@ -54,6 +77,26 @@ export function createReactHookHarness() {
     useMemo<T>(factory: () => T): T {
       nextIndex();
       return factory();
+    },
+    useEffect(effect: EffectCallback, dependencies?: DependencyList) {
+      const index = nextIndex();
+      const previous = slots[index] as
+        | {
+            cleanup?: void | (() => void);
+            dependencies: DependencyList | undefined;
+            effect?: EffectCallback;
+            pending?: boolean;
+          }
+        | undefined;
+      if (!previous) {
+        slots[index] = { dependencies, effect, pending: true };
+        return;
+      }
+      if (dependenciesChanged(previous.dependencies, dependencies)) {
+        previous.dependencies = dependencies;
+        previous.effect = effect;
+        previous.pending = true;
+      }
     },
     useMemoCache(size: number): unknown[] {
       const index = nextIndex();

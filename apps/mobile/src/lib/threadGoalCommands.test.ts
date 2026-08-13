@@ -1,11 +1,18 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 
 import {
   buildThreadComposerSlashCommandItems,
+  canExecuteThreadGoalCommand,
   dispatchThreadGoalCommand,
   parseComposerGoalCommand,
+  resolveThreadGoalProviderDriver,
   resolveThreadComposerSubmission,
 } from "./threadGoalCommands";
 
@@ -22,6 +29,56 @@ describe("mobile thread goal commands", () => {
     expect(commandsFor("codex")).toContain("/goal");
     expect(commandsFor("claudeAgent")).not.toContain("/goal");
     expect(commandsFor("grok")).not.toContain("/goal");
+  });
+
+  it("requires both a live connection and Codex before executing a goal command", () => {
+    expect(
+      canExecuteThreadGoalCommand({ connectionState: "connected", providerDriver: "codex" }),
+    ).toBe(true);
+    expect(
+      canExecuteThreadGoalCommand({ connectionState: "reconnecting", providerDriver: "codex" }),
+    ).toBe(false);
+    expect(
+      canExecuteThreadGoalCommand({
+        connectionState: "connected",
+        providerDriver: "claudeAgent",
+      }),
+    ).toBe(false);
+  });
+
+  it("uses the running session provider before a draft model selection", () => {
+    const providers = [
+      {
+        instanceId: ProviderInstanceId.make("codex-main"),
+        driver: ProviderDriverKind.make("codex"),
+      },
+      {
+        instanceId: ProviderInstanceId.make("claude-main"),
+        driver: ProviderDriverKind.make("claudeAgent"),
+      },
+    ];
+
+    expect(
+      resolveThreadGoalProviderDriver({
+        sessionProviderInstanceId: ProviderInstanceId.make("claude-main"),
+        modelSelectionInstanceId: ProviderInstanceId.make("codex-main"),
+        providers,
+      }),
+    ).toBe("claudeAgent");
+    expect(
+      resolveThreadGoalProviderDriver({
+        sessionProviderInstanceId: null,
+        modelSelectionInstanceId: ProviderInstanceId.make("codex-main"),
+        providers,
+      }),
+    ).toBe("codex");
+    expect(
+      resolveThreadGoalProviderDriver({
+        sessionProviderInstanceId: ProviderInstanceId.make("missing"),
+        modelSelectionInstanceId: ProviderInstanceId.make("codex-main"),
+        providers,
+      }),
+    ).toBeNull();
   });
 
   it("does not expose a provider command that collides with native /goal", () => {

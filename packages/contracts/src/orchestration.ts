@@ -361,6 +361,25 @@ export const ThreadTitleRegeneration = Schema.Struct({
 });
 export type ThreadTitleRegeneration = typeof ThreadTitleRegeneration.Type;
 
+export const ThreadGoalStatus = Schema.Literals([
+  "active",
+  "paused",
+  "blocked",
+  "complete",
+  "budgetLimited",
+  "usageLimited",
+]);
+export type ThreadGoalStatus = typeof ThreadGoalStatus.Type;
+
+export const ThreadGoalSnapshot = Schema.Struct({
+  objective: TrimmedNonEmptyString,
+  status: ThreadGoalStatus,
+  tokensUsed: NonNegativeInt,
+  timeUsedSeconds: NonNegativeInt,
+  tokenBudget: Schema.optional(Schema.NullOr(NonNegativeInt)),
+});
+export type ThreadGoalSnapshot = typeof ThreadGoalSnapshot.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -397,6 +416,11 @@ export const OrchestrationThread = Schema.Struct({
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   // Pending-only state. Optional so older servers remain compatible.
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
+  goal: Schema.NullOr(ThreadGoalSnapshot).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  // Latest provider-pushed goal update applied to this thread. Kept outside
+  // the windowed activity list so delayed command responses can be ordered
+  // correctly even after the originating activity has been paged out.
+  goalSyncedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
@@ -835,25 +859,7 @@ export type ThreadGoalOperation = typeof ThreadGoalOperation.Type;
 export const THREAD_GOAL_UPDATED_ACTIVITY_KIND = "provider.thread.goal.updated";
 export const THREAD_GOAL_READ_ACTIVITY_KIND = "provider.thread.goal.read";
 export const THREAD_GOAL_UPDATE_FAILED_ACTIVITY_KIND = "provider.thread.goal.update.failed";
-
-export const ThreadGoalStatus = Schema.Literals([
-  "active",
-  "paused",
-  "blocked",
-  "complete",
-  "budgetLimited",
-  "usageLimited",
-]);
-export type ThreadGoalStatus = typeof ThreadGoalStatus.Type;
-
-export const ThreadGoalSnapshot = Schema.Struct({
-  objective: TrimmedNonEmptyString,
-  status: ThreadGoalStatus,
-  tokensUsed: NonNegativeInt,
-  timeUsedSeconds: NonNegativeInt,
-  tokenBudget: Schema.optional(Schema.NullOr(NonNegativeInt)),
-});
-export type ThreadGoalSnapshot = typeof ThreadGoalSnapshot.Type;
+export const THREAD_GOAL_SYNCED_ACTIVITY_KIND = "provider.thread.goal.synced";
 
 export const ThreadGoalActivityPayload = Schema.Struct({
   commandId: CommandId,
@@ -861,8 +867,15 @@ export const ThreadGoalActivityPayload = Schema.Struct({
   objective: Schema.optional(TrimmedNonEmptyString),
   goal: Schema.optional(Schema.NullOr(ThreadGoalSnapshot)),
   detail: Schema.optional(TrimmedNonEmptyString),
+  requestStartedAt: Schema.optional(IsoDateTime),
 });
 export type ThreadGoalActivityPayload = typeof ThreadGoalActivityPayload.Type;
+
+export const ThreadGoalSyncActivityPayload = Schema.Struct({
+  goal: Schema.NullOr(ThreadGoalSnapshot),
+  timelineBypass: Schema.Literal(true),
+});
+export type ThreadGoalSyncActivityPayload = typeof ThreadGoalSyncActivityPayload.Type;
 
 export const ThreadGoalGetCommand = Schema.Struct({
   type: Schema.Literal("thread.goal.get"),

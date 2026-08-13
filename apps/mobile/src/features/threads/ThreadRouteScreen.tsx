@@ -210,6 +210,14 @@ function ThreadRouteContent(
   }, [selectedThread, selectedThreadDetailState]);
   const { selectedThreadCwd } = useSelectedThreadWorktree();
   const composer = useThreadComposerState();
+  const livePlan =
+    selectedThread?.session?.status === "running" && selectedThread.planProgress
+      ? {
+          currentStep: selectedThread.planProgress.step,
+          completedSteps: selectedThread.planProgress.completedSteps,
+          totalSteps: selectedThread.planProgress.totalSteps,
+        }
+      : null;
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
   const requests = useSelectedThreadRequests();
@@ -786,6 +794,10 @@ function ThreadRouteContent(
           threadSyncStatus={selectedThreadDetailState.status}
           loadEarlier={loadEarlierTurns}
           activeThreadBusy={composer.activeThreadBusy}
+          livePlan={livePlan}
+          goal={composer.goal}
+          pendingGoalAction={composer.pendingGoalAction}
+          goalControlsDisabled={composer.goalControlsDisabled}
           environmentId={selectedThread.environmentId}
           projectWorkspaceRoot={selectedThreadProject?.workspaceRoot ?? null}
           threadCwd={selectedThreadCwd}
@@ -800,6 +812,10 @@ function ThreadRouteContent(
           serverConfig={serverConfig}
           onStopThread={handleStopThread}
           onSendMessage={composer.onSendMessage}
+          onSetGoal={composer.onSetGoal}
+          onPauseGoal={composer.onPauseGoal}
+          onResumeGoal={composer.onResumeGoal}
+          onClearGoal={composer.onClearGoal}
           onReconnectEnvironment={handleReconnectEnvironment}
           onUpdateThreadModelSelection={composer.onUpdateModelSelection}
           onUpdateThreadRuntimeMode={composer.onUpdateRuntimeMode}

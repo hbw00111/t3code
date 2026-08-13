@@ -9,6 +9,10 @@ composer, choose the command, then add the objective:
 
 Type `/goal` by itself to see the current objective, status, token usage, and elapsed time.
 
+While a goal exists, it stays above the message composer with its status, usage, and elapsed time.
+Use the controls there to edit, pause, resume, or clear it. During a turn with a plan, the current
+step and completion count stay in the same area so progress remains visible while the chat moves.
+
 Use these commands in the same thread to control the goal:
 
 ```text

@@ -103,6 +103,7 @@ const DEFAULT_THREAD_TITLE = "New thread";
 const MAX_REGENERATION_ATTACHMENTS = 4;
 const MAX_THREAD_TITLE_CONTEXT_CHARS = 8_000;
 const MAX_FIRST_USER_TITLE_CONTEXT_CHARS = 2_000;
+const THREAD_GOAL_REQUEST_TIMEOUT = Duration.seconds(10);
 const THREAD_TITLE_CONTEXT_TRUNCATION_MARKER = "[Earlier content truncated]\n\n";
 const FIRST_USER_CONTEXT_TRUNCATION_MARKER = "\n[First user message truncated]";
 
@@ -389,6 +390,7 @@ const make = Effect.gen(function* () {
   const appendThreadGoalActivity = Effect.fn("appendThreadGoalActivity")(function* (input: {
     readonly event: Extract<ProviderIntentEvent, { type: "thread.goal-requested" }>;
     readonly status: "read" | "updated" | "failed";
+    readonly requestStartedAt: string;
     readonly goal?: ThreadGoalSnapshot | null;
     readonly detail?: string;
   }) {
@@ -419,6 +421,7 @@ const make = Effect.gen(function* () {
         payload: {
           commandId: input.event.commandId ?? commandId,
           operation: input.event.payload.operation,
+          requestStartedAt: input.requestStartedAt,
           ...(input.event.payload.objective !== undefined
             ? { objective: input.event.payload.objective }
             : {}),
@@ -1241,15 +1244,29 @@ const make = Effect.gen(function* () {
   const processThreadGoalRequested = Effect.fn("processThreadGoalRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.goal-requested" }>,
   ) {
+    let requestStartedAt: string = event.payload.createdAt;
     const updateExit = yield* Effect.exit(
       Effect.gen(function* () {
         yield* ensureSessionForThread(event.payload.threadId, event.payload.createdAt);
+        requestStartedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
         return yield* providerService.setThreadGoal({
           threadId: event.payload.threadId,
           operation: event.payload.operation,
           ...(event.payload.objective !== undefined ? { objective: event.payload.objective } : {}),
         });
-      }),
+      }).pipe(
+        Effect.timeoutOrElse({
+          duration: THREAD_GOAL_REQUEST_TIMEOUT,
+          orElse: () =>
+            Effect.fail(
+              new ProviderAdapterRequestError({
+                provider: "unknown",
+                method: "thread.goal",
+                detail: "Thread goal request timed out.",
+              }),
+            ),
+        }),
+      ),
     );
     if (Exit.isFailure(updateExit)) {
       if (Cause.hasInterruptsOnly(updateExit.cause)) {
@@ -1258,12 +1275,14 @@ const make = Effect.gen(function* () {
       return yield* appendThreadGoalActivity({
         event,
         status: "failed",
+        requestStartedAt,
         detail: formatFailureDetail(updateExit.cause),
       });
     }
     yield* appendThreadGoalActivity({
       event,
       status: event.payload.operation === "get" ? "read" : "updated",
+      requestStartedAt,
       goal: updateExit.value,
     });
   });

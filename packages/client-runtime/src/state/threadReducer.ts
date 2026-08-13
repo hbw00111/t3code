@@ -12,6 +12,13 @@ import type {
   OrchestrationThreadActivity,
   TurnId,
 } from "@t3tools/contracts";
+import {
+  THREAD_GOAL_READ_ACTIVITY_KIND,
+  THREAD_GOAL_SYNCED_ACTIVITY_KIND,
+  THREAD_GOAL_UPDATED_ACTIVITY_KIND,
+  ThreadGoalSnapshot,
+} from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 
 export type ThreadDetailReducerResult =
   | { readonly kind: "updated"; readonly thread: OrchestrationThread }
@@ -34,6 +41,45 @@ const activityOrder = O.combineAll<OrchestrationThreadActivity>([
   O.mapInput(O.String, (a) => a.createdAt),
   O.mapInput(O.String, (a) => a.id),
 ]);
+
+const isThreadGoalSnapshot = Schema.is(ThreadGoalSnapshot);
+
+function goalFromActivity(
+  activity: OrchestrationThreadActivity,
+  goalSyncedAt: string | null | undefined,
+): OrchestrationThread["goal"] | undefined {
+  if (
+    activity.kind !== THREAD_GOAL_UPDATED_ACTIVITY_KIND &&
+    activity.kind !== THREAD_GOAL_READ_ACTIVITY_KIND &&
+    activity.kind !== THREAD_GOAL_SYNCED_ACTIVITY_KIND
+  ) {
+    return undefined;
+  }
+  if (typeof activity.payload !== "object" || activity.payload === null) {
+    return undefined;
+  }
+  const payload = activity.payload as Record<string, unknown>;
+  const requestStartedAt = payload.requestStartedAt;
+  if (
+    activity.kind === THREAD_GOAL_SYNCED_ACTIVITY_KIND &&
+    goalSyncedAt !== null &&
+    goalSyncedAt !== undefined &&
+    activity.createdAt < goalSyncedAt
+  ) {
+    return undefined;
+  }
+  if (
+    typeof requestStartedAt === "string" &&
+    goalSyncedAt !== null &&
+    goalSyncedAt !== undefined &&
+    goalSyncedAt.localeCompare(requestStartedAt) >= 0
+  ) {
+    return undefined;
+  }
+  const goal = payload.goal;
+  if (goal === null) return null;
+  return isThreadGoalSnapshot(goal) ? goal : undefined;
+}
 
 /**
  * Matches the validity rule in `deriveLatestContextWindowSnapshot` (and the
@@ -94,6 +140,7 @@ export function applyThreadDetailEvent(
           settledAt: null,
           snoozedUntil: null,
           snoozedAt: null,
+          goal: null,
           deletedAt: null,
           messages: [],
           proposedPlans: [],
@@ -585,10 +632,25 @@ export function applyThreadDetailEvent(
         Arr.append(activity),
         Arr.sort(activityOrder),
       );
+      const goal = goalFromActivity(activity, thread.goalSyncedAt);
+      const goalSyncedAt =
+        activity.kind === THREAD_GOAL_SYNCED_ACTIVITY_KIND && goal !== undefined
+          ? thread.goalSyncedAt === undefined ||
+            thread.goalSyncedAt === null ||
+            activity.createdAt > thread.goalSyncedAt
+            ? activity.createdAt
+            : thread.goalSyncedAt
+          : thread.goalSyncedAt;
 
       return {
         kind: "updated",
-        thread: { ...thread, activities, updatedAt: event.occurredAt },
+        thread: {
+          ...thread,
+          activities,
+          ...(goal !== undefined ? { goal } : {}),
+          ...(goalSyncedAt !== undefined ? { goalSyncedAt } : {}),
+          updatedAt: event.occurredAt,
+        },
       };
     }
 

@@ -152,6 +152,7 @@ describe("OrchestrationEngine", () => {
           archivedAt: null,
           settledOverride: null,
           settledAt: null,
+          goal: null,
           deletedAt: null,
           messages: [],
           proposedPlans: [],

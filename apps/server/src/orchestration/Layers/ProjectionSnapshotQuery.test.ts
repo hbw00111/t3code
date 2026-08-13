@@ -326,6 +326,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           pinnedAt: "2026-02-24T00:00:01.000Z",
           pinOrderKey: "gm",
           titleRegeneration: null,
+          goal: null,
+          goalSyncedAt: null,
           deletedAt: null,
           messages: [
             {
@@ -467,6 +469,38 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       assert.equal(threadDetail._tag, "Some");
       if (threadDetail._tag === "Some") {
         assert.deepEqual(threadDetail.value, snapshot.threads[0]);
+      }
+    }),
+  );
+
+  it.effect("returns a persisted goal in full and detail snapshots", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+      const goal = {
+        objective: "Ship goal projections",
+        status: "active",
+        tokensUsed: 42,
+        timeUsedSeconds: 9,
+        tokenBudget: 1_000,
+      } as const;
+
+      yield* sql`
+        UPDATE projection_threads
+        SET
+          goal_json = '{"objective":"Ship goal projections","status":"active","tokensUsed":42,"timeUsedSeconds":9,"tokenBudget":1000}',
+          goal_synced_at = '2026-02-24T00:00:10.000Z'
+        WHERE thread_id = 'thread-1'
+      `;
+
+      const snapshot = yield* snapshotQuery.getSnapshot();
+      const detail = yield* snapshotQuery.getThreadDetailById(ThreadId.make("thread-1"));
+      assert.deepEqual(snapshot.threads[0]?.goal, goal);
+      assert.equal(snapshot.threads[0]?.goalSyncedAt, "2026-02-24T00:00:10.000Z");
+      assert.equal(detail._tag, "Some");
+      if (detail._tag === "Some") {
+        assert.deepEqual(detail.value.goal, goal);
+        assert.equal(detail.value.goalSyncedAt, "2026-02-24T00:00:10.000Z");
       }
     }),
   );

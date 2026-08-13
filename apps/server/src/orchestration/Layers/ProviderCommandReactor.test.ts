@@ -9,6 +9,7 @@ import {
   ProviderSession,
   ProviderDriverKind,
   ProviderInstanceId,
+  type ProviderThreadGoalResult,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import {
@@ -29,6 +30,7 @@ import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as PubSub from "effect/PubSub";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import { it as effectIt } from "@effect/vitest";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -150,6 +152,7 @@ describe("ProviderCommandReactor", () => {
     readonly requiresNewThreadForModelChange?: boolean;
     readonly titleRegenerationCompletionDispatchFailures?: number;
     readonly titleRegenerationBeforeStart?: "one" | "two";
+    readonly useTestClock?: boolean;
     readonly startSessionEffect?: (
       session: ProviderSession,
     ) => Effect.Effect<ProviderSession, ProviderAdapterRequestError>;
@@ -389,6 +392,10 @@ describe("ProviderCommandReactor", () => {
         } satisfies OrchestrationEngineService["Service"];
       }),
     ).pipe(Layer.provide(orchestrationLayer));
+    const nodeServicesLayer =
+      input?.useTestClock === true
+        ? Layer.mergeAll(NodeServices.layer, TestClock.layer({ warningDelay: "30 seconds" }))
+        : NodeServices.layer;
     const layer = ProviderCommandReactorLive.pipe(
       Layer.provideMerge(reactorOrchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
@@ -416,7 +423,7 @@ describe("ProviderCommandReactor", () => {
       ),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(nodeServicesLayer),
     );
     runtime = ManagedRuntime.make(layer);
 
@@ -660,6 +667,13 @@ describe("ProviderCommandReactor", () => {
     });
     const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(thread?.goal).toEqual({
+      objective: "Finish the migration",
+      status: "active",
+      tokensUsed: 42,
+      timeUsedSeconds: 7,
+      tokenBudget: 1_000,
+    });
     expect(
       thread?.activities.find((activity) => activity.kind === "provider.thread.goal.read"),
     ).toMatchObject({
@@ -676,6 +690,117 @@ describe("ProviderCommandReactor", () => {
         },
       },
     });
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.goal.clear",
+        commandId: CommandId.make("cmd-thread-goal-clear"),
+        threadId: ThreadId.make("thread-1"),
+        createdAt: now,
+      }),
+    );
+    await waitFor(() => harness.setThreadGoal.mock.calls.length === 2);
+    await harness.drain();
+    const clearedReadModel = await harness.readModel();
+    const clearedThread = clearedReadModel.threads.find(
+      (entry) => entry.id === ThreadId.make("thread-1"),
+    );
+    expect(clearedThread?.goal).toBeNull();
+    expect(
+      clearedThread?.activities.find(
+        (activity) =>
+          activity.kind === "provider.thread.goal.updated" &&
+          typeof activity.payload === "object" &&
+          activity.payload !== null &&
+          "operation" in activity.payload &&
+          activity.payload.operation === "clear",
+      ),
+    ).toMatchObject({ payload: { goal: null } });
+  });
+
+  it("keeps a synced goal newer than an in-flight provider response", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-goal-race"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "ready",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+    const providerResponse = await harness.runEffect(Deferred.make<ProviderThreadGoalResult>());
+    harness.setThreadGoal.mockImplementationOnce(() => Deferred.await(providerResponse));
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.goal.get",
+        commandId: CommandId.make("cmd-thread-goal-race"),
+        threadId: ThreadId.make("thread-1"),
+        createdAt: now,
+      }),
+    );
+    await waitFor(() => harness.setThreadGoal.mock.calls.length === 1);
+
+    const syncedAt = "2099-01-01T00:00:00.000Z";
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.activity.append",
+        commandId: CommandId.make("provider:thread-goal-race-sync"),
+        threadId: ThreadId.make("thread-1"),
+        activity: {
+          id: EventId.make("activity-thread-goal-race-sync"),
+          tone: "info",
+          kind: "provider.thread.goal.synced",
+          summary: "Thread goal synchronized",
+          payload: {
+            goal: {
+              objective: "New synchronized goal",
+              status: "active",
+              tokensUsed: 20,
+              timeUsedSeconds: 5,
+            },
+            timelineBypass: true,
+          },
+          turnId: null,
+          createdAt: syncedAt,
+        },
+        createdAt: syncedAt,
+      }),
+    );
+    await harness.runEffect(
+      Deferred.succeed(providerResponse, {
+        objective: "Stale provider response",
+        status: "active",
+        tokensUsed: 1,
+        timeUsedSeconds: 1,
+      }),
+    );
+
+    await harness.drain();
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(thread?.goal?.objective).toBe("New synchronized goal");
+    expect(
+      thread?.activities.some(
+        (activity) =>
+          activity.kind === "provider.thread.goal.read" &&
+          typeof activity.payload === "object" &&
+          activity.payload !== null &&
+          "commandId" in activity.payload &&
+          activity.payload.commandId === "cmd-thread-goal-race",
+      ),
+    ).toBe(true);
   });
 
   it("projects provider goal failures instead of reporting accepted commands as success", async () => {
@@ -726,6 +851,149 @@ describe("ProviderCommandReactor", () => {
         detail: expect.stringContaining("claudeAgent"),
       },
     });
+  });
+
+  it("records a timed-out goal request and continues the serial reactor", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-goal-timeout"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "ready",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+    harness.setThreadGoal.mockImplementationOnce(() =>
+      Effect.never.pipe(
+        Effect.timeoutOrElse({
+          duration: "10 millis",
+          orElse: () =>
+            Effect.fail(
+              new ProviderAdapterRequestError({
+                provider: "codex",
+                method: "thread/goal/get",
+                detail: "Codex App Server request timed out for method 'thread/goal/get'.",
+              }),
+            ),
+        }),
+      ),
+    );
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.goal.get",
+        commandId: CommandId.make("cmd-thread-goal-timeout"),
+        threadId: ThreadId.make("thread-1"),
+        createdAt: now,
+      }),
+    );
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.goal.clear",
+        commandId: CommandId.make("cmd-thread-goal-after-timeout"),
+        threadId: ThreadId.make("thread-1"),
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.setThreadGoal.mock.calls.length === 2);
+    await harness.drain();
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(
+      thread?.activities.find(
+        (activity) =>
+          activity.kind === "provider.thread.goal.update.failed" &&
+          typeof activity.payload === "object" &&
+          activity.payload !== null &&
+          "commandId" in activity.payload &&
+          activity.payload.commandId === "cmd-thread-goal-timeout",
+      ),
+    ).toMatchObject({ payload: { detail: expect.stringContaining("timed out") } });
+    expect(
+      thread?.activities.find(
+        (activity) =>
+          activity.kind === "provider.thread.goal.updated" &&
+          typeof activity.payload === "object" &&
+          activity.payload !== null &&
+          "commandId" in activity.payload &&
+          activity.payload.commandId === "cmd-thread-goal-after-timeout",
+      ),
+    ).toBeDefined();
+  });
+
+  it("times out a goal request stuck starting a cold session and continues the serial reactor", async () => {
+    let startAttempts = 0;
+    const harness = await createHarness({
+      useTestClock: true,
+      startSessionEffect: (session) => {
+        startAttempts += 1;
+        return startAttempts === 1 ? Effect.never : Effect.succeed(session);
+      },
+    });
+    const now = "2026-01-01T00:00:00.000Z";
+    await harness.runEffect(Effect.yieldNow);
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.goal.get",
+        commandId: CommandId.make("cmd-thread-goal-cold-session-timeout"),
+        threadId: ThreadId.make("thread-1"),
+        createdAt: now,
+      }),
+    );
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.goal.clear",
+        commandId: CommandId.make("cmd-thread-goal-after-cold-session-timeout"),
+        threadId: ThreadId.make("thread-1"),
+        createdAt: now,
+      }),
+    );
+
+    await harness.runEffect(TestClock.adjust("10 seconds"));
+    await waitFor(() => harness.startSession.mock.calls.length === 2);
+    await waitFor(() => harness.setThreadGoal.mock.calls.length === 1);
+    await harness.drain();
+
+    expect(harness.setThreadGoal.mock.calls[0]?.[0]).toEqual({
+      threadId: ThreadId.make("thread-1"),
+      operation: "clear",
+    });
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(
+      thread?.activities.find(
+        (activity) =>
+          activity.kind === "provider.thread.goal.update.failed" &&
+          typeof activity.payload === "object" &&
+          activity.payload !== null &&
+          "commandId" in activity.payload &&
+          activity.payload.commandId === "cmd-thread-goal-cold-session-timeout",
+      ),
+    ).toMatchObject({ payload: { detail: expect.stringContaining("timed out") } });
+    expect(
+      thread?.activities.find(
+        (activity) =>
+          activity.kind === "provider.thread.goal.updated" &&
+          typeof activity.payload === "object" &&
+          activity.payload !== null &&
+          "commandId" in activity.payload &&
+          activity.payload.commandId === "cmd-thread-goal-after-cold-session-timeout",
+      ),
+    ).toBeDefined();
   });
 
   effectIt.effect("projects starting before a slow provider session finishes", () =>
@@ -2887,7 +3155,7 @@ describe("ProviderCommandReactor", () => {
       ),
     );
 
-    await Effect.runPromise(
+    await harness.runEffect(
       harness.engine.dispatch({
         type: "thread.session.set",
         commandId: CommandId.make("cmd-session-set-for-approval-error"),
@@ -2905,7 +3173,7 @@ describe("ProviderCommandReactor", () => {
       }),
     );
 
-    await Effect.runPromise(
+    await harness.runEffect(
       harness.engine.dispatch({
         type: "thread.activity.append",
         commandId: CommandId.make("cmd-approval-requested"),
@@ -2926,7 +3194,7 @@ describe("ProviderCommandReactor", () => {
       }),
     );
 
-    await Effect.runPromise(
+    await harness.runEffect(
       harness.engine.dispatch({
         type: "thread.approval.respond",
         commandId: CommandId.make("cmd-approval-respond-stale"),

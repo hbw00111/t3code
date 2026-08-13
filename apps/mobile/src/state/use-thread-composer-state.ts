@@ -25,10 +25,12 @@ import {
 } from "../lib/composerImages";
 import type { DraftComposerImageAttachment } from "../lib/composerImages";
 import { scopedThreadKey } from "../lib/scopedEntities";
+import { uuidv4 } from "../lib/uuid";
 import { buildThreadFeed } from "../lib/threadActivity";
 import {
+  canExecuteThreadGoalCommand,
   dispatchThreadGoalCommand,
-  providerSupportsThreadGoals,
+  resolveThreadGoalProviderDriver,
   resolveThreadComposerSubmission,
 } from "../lib/threadGoalCommands";
 import { appAtomRegistry } from "../state/atom-registry";
@@ -53,6 +55,13 @@ import { useThreadSelection } from "../state/use-thread-selection";
 import { enqueueThreadOutboxMessage } from "./thread-outbox";
 import { useThreadOutboxMessages } from "./use-thread-outbox";
 import { threadEnvironment } from "./threads";
+import { findThreadGoalCommandReceipt } from "../features/threads/ThreadLiveStatusStrip.logic";
+import {
+  beginPendingGoalCommand,
+  clearPendingGoalCommand,
+  clearPendingGoalCommandsForEnvironment,
+  usePendingGoalCommands,
+} from "./thread-goal-command-state";
 
 export function appendReviewCommentToDraft(input: {
   readonly environmentId: EnvironmentId;
@@ -86,7 +95,7 @@ export function useThreadDraftForThread(input: {
 }
 
 export function useThreadComposerState() {
-  const { selectedThread: selectedThreadShell } = useThreadSelection();
+  const { selectedThread: selectedThreadShell, selectedEnvironmentRuntime } = useThreadSelection();
   const selectedThreadDetail = useSelectedThreadDetail();
   const serverConfig = useEnvironmentServerConfig(selectedThreadShell?.environmentId ?? null);
   const composerDrafts = useAtomValue(composerDraftsAtom);
@@ -96,6 +105,7 @@ export function useThreadComposerState() {
   const pauseThreadGoal = useAtomCommand(threadEnvironment.pauseGoal, { reportFailure: false });
   const resumeThreadGoal = useAtomCommand(threadEnvironment.resumeGoal, { reportFailure: false });
   const clearThreadGoal = useAtomCommand(threadEnvironment.clearGoal, { reportFailure: false });
+  const pendingGoalCommands = usePendingGoalCommands();
 
   useEffect(() => {
     ensureComposerDraftsLoaded();
@@ -104,6 +114,30 @@ export function useThreadComposerState() {
   const selectedThreadKey = selectedThreadShell
     ? scopedThreadKey(selectedThreadShell.environmentId, selectedThreadShell.id)
     : null;
+  useEffect(() => {
+    const connectionState = selectedEnvironmentRuntime?.connectionState;
+    if (connectionState === undefined || connectionState === "connected") return;
+    const environmentId = selectedThreadShell?.environmentId;
+    if (!environmentId) return;
+    clearPendingGoalCommandsForEnvironment(environmentId);
+  }, [selectedEnvironmentRuntime?.connectionState, selectedThreadShell?.environmentId]);
+
+  useEffect(() => {
+    const pending = selectedThreadKey ? pendingGoalCommands[selectedThreadKey] : undefined;
+    if (!pending || pending.threadKey !== selectedThreadKey || !selectedThreadDetail) {
+      return;
+    }
+    const receipt = findThreadGoalCommandReceipt(
+      selectedThreadDetail.activities,
+      pending.commandId,
+    );
+    if (!receipt) return;
+
+    clearPendingGoalCommand(pending.threadKey, pending.commandId);
+    if (receipt.failed) {
+      setPendingConnectionError(receipt.detail ?? "The goal command failed.");
+    }
+  }, [pendingGoalCommands, selectedThreadDetail, selectedThreadKey]);
   const selectedThreadQueuedMessages = useMemo(
     () => (selectedThreadKey ? (queuedMessagesByThreadKey[selectedThreadKey] ?? []) : []),
     [queuedMessagesByThreadKey, selectedThreadKey],
@@ -121,6 +155,16 @@ export function useThreadComposerState() {
   const modelSelection = selectedDraft?.modelSelection ?? selectedThread?.modelSelection ?? null;
   const runtimeMode = selectedDraft?.runtimeMode ?? selectedThread?.runtimeMode ?? null;
   const interactionMode = selectedDraft?.interactionMode ?? selectedThread?.interactionMode ?? null;
+  const goalProviderDriver = resolveThreadGoalProviderDriver({
+    sessionProviderInstanceId: selectedThread?.session?.providerInstanceId,
+    modelSelectionInstanceId: modelSelection?.instanceId,
+    providers: serverConfig?.providers,
+  });
+  const environmentConnected = selectedEnvironmentRuntime?.connectionState === "connected";
+  const goalControlsDisabled = !canExecuteThreadGoalCommand({
+    connectionState: selectedEnvironmentRuntime?.connectionState,
+    providerDriver: goalProviderDriver,
+  });
 
   const selectedThreadSessionActivity = useMemo(() => {
     const selectedThread = selectedThreadDetail ?? selectedThreadShell;
@@ -151,6 +195,76 @@ export function useThreadComposerState() {
     !!selectedThread &&
     (selectedThread.session?.status === "running" || selectedThread.session?.status === "starting");
 
+  const executeGoalCommand = useCallback(
+    async (
+      command: Parameters<typeof dispatchThreadGoalCommand>[0]["command"],
+    ): Promise<boolean> => {
+      if (!selectedThreadShell) return false;
+      if (!environmentConnected) {
+        setPendingConnectionError("Reconnect this environment before using /goal.");
+        return false;
+      }
+      if (goalControlsDisabled) {
+        setPendingConnectionError(
+          "Goals require Codex. Switch to a Codex model before using /goal.",
+        );
+        return false;
+      }
+      const threadKey = scopedThreadKey(selectedThreadShell.environmentId, selectedThreadShell.id);
+
+      const commandId = CommandId.make(uuidv4());
+      const pending = {
+        environmentId: selectedThreadShell.environmentId,
+        threadKey,
+        commandId,
+        action: command.action,
+      };
+      if (!beginPendingGoalCommand(pending)) return false;
+      setPendingConnectionError(null);
+
+      const withCommandId = <Input extends { readonly input: { readonly threadId: ThreadId } }>(
+        input: Input,
+      ) => ({
+        ...input,
+        input: { ...input.input, commandId },
+      });
+      const result = await dispatchThreadGoalCommand({
+        command,
+        target: {
+          environmentId: selectedThreadShell.environmentId,
+          threadId: selectedThreadShell.id,
+        },
+        operations: {
+          getGoal: (input) => getThreadGoal(withCommandId(input)),
+          setGoal: (input) => setThreadGoal(withCommandId(input)),
+          pauseGoal: (input) => pauseThreadGoal(withCommandId(input)),
+          resumeGoal: (input) => resumeThreadGoal(withCommandId(input)),
+          clearGoal: (input) => clearThreadGoal(withCommandId(input)),
+        },
+      });
+      if (result._tag !== "Failure") return true;
+
+      clearPendingGoalCommand(threadKey, commandId);
+      if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setPendingConnectionError(
+          error instanceof Error ? error.message : "The goal command failed.",
+        );
+      }
+      return false;
+    },
+    [
+      clearThreadGoal,
+      getThreadGoal,
+      environmentConnected,
+      goalControlsDisabled,
+      pauseThreadGoal,
+      resumeThreadGoal,
+      selectedThreadShell,
+      setThreadGoal,
+    ],
+  );
+
   const onSendMessage = useCallback(async () => {
     if (!selectedThreadShell) {
       return null;
@@ -170,41 +284,8 @@ export function useThreadComposerState() {
     }
 
     if (submission.kind === "goal") {
-      const modelSelection = draft.modelSelection ?? thread.modelSelection;
-      const providerDriver = serverConfig?.providers.find(
-        (provider) => provider.instanceId === modelSelection.instanceId,
-      )?.driver;
-      if (!providerSupportsThreadGoals(providerDriver)) {
-        setPendingConnectionError(
-          "Goals require Codex. Switch to a Codex model before using /goal.",
-        );
-        return null;
-      }
-
-      setPendingConnectionError(null);
-      const result = await dispatchThreadGoalCommand({
-        command: submission.command,
-        target: {
-          environmentId: selectedThreadShell.environmentId,
-          threadId: selectedThreadShell.id,
-        },
-        operations: {
-          getGoal: getThreadGoal,
-          setGoal: setThreadGoal,
-          pauseGoal: pauseThreadGoal,
-          resumeGoal: resumeThreadGoal,
-          clearGoal: clearThreadGoal,
-        },
-      });
-      if (result._tag === "Failure") {
-        if (!isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
-          setPendingConnectionError(
-            error instanceof Error ? error.message : "The goal command failed.",
-          );
-        }
-        return null;
-      }
+      const accepted = await executeGoalCommand(submission.command);
+      if (!accepted) return null;
 
       clearComposerDraftContent(threadKey);
       return null;
@@ -242,16 +323,24 @@ export function useThreadComposerState() {
       );
     });
     return messageId;
-  }, [
-    clearThreadGoal,
-    getThreadGoal,
-    pauseThreadGoal,
-    resumeThreadGoal,
-    selectedThreadDetail,
-    selectedThreadShell,
-    serverConfig,
-    setThreadGoal,
-  ]);
+  }, [executeGoalCommand, selectedThreadDetail, selectedThreadShell]);
+
+  const onSetGoal = useCallback(
+    (objective: string) => executeGoalCommand({ action: "set", objective }),
+    [executeGoalCommand],
+  );
+  const onPauseGoal = useCallback(
+    () => executeGoalCommand({ action: "pause" }),
+    [executeGoalCommand],
+  );
+  const onResumeGoal = useCallback(
+    () => executeGoalCommand({ action: "resume" }),
+    [executeGoalCommand],
+  );
+  const onClearGoal = useCallback(
+    () => executeGoalCommand({ action: "clear" }),
+    [executeGoalCommand],
+  );
 
   const onChangeDraftMessage = useCallback(
     (value: string) => {
@@ -381,12 +470,21 @@ export function useThreadComposerState() {
     runtimeMode,
     interactionMode,
     activeThreadBusy,
+    goalControlsDisabled,
+    goal: selectedThreadDetail?.goal ?? null,
+    pendingGoalAction: selectedThreadKey
+      ? (pendingGoalCommands[selectedThreadKey]?.action ?? null)
+      : null,
     onChangeDraftMessage,
     onPickDraftImages,
     onPasteIntoDraft,
     onNativePasteImages,
     onRemoveDraftImage,
     onSendMessage,
+    onSetGoal,
+    onPauseGoal,
+    onResumeGoal,
+    onClearGoal,
     onUpdateModelSelection,
     onUpdateRuntimeMode,
     onUpdateInteractionMode,

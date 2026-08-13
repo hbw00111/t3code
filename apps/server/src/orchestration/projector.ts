@@ -4,6 +4,10 @@ import {
   OrchestrationMessage,
   OrchestrationSession,
   OrchestrationThread,
+  THREAD_GOAL_READ_ACTIVITY_KIND,
+  THREAD_GOAL_SYNCED_ACTIVITY_KIND,
+  THREAD_GOAL_UPDATED_ACTIVITY_KIND,
+  ThreadGoalSnapshot,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -38,6 +42,46 @@ import {
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
 const MAX_THREAD_MESSAGES = 2_000;
 const MAX_THREAD_CHECKPOINTS = 500;
+const decodeThreadGoalSnapshot = Schema.decodeUnknownOption(ThreadGoalSnapshot);
+
+function goalFromActivity(
+  activity: OrchestrationThread["activities"][number],
+  goalSyncedAt: string | null | undefined,
+) {
+  if (
+    activity.kind !== THREAD_GOAL_UPDATED_ACTIVITY_KIND &&
+    activity.kind !== THREAD_GOAL_READ_ACTIVITY_KIND &&
+    activity.kind !== THREAD_GOAL_SYNCED_ACTIVITY_KIND
+  ) {
+    return undefined;
+  }
+  if (typeof activity.payload !== "object" || activity.payload === null) {
+    return undefined;
+  }
+  const requestStartedAt = (activity.payload as Record<string, unknown>).requestStartedAt;
+  if (
+    activity.kind === THREAD_GOAL_SYNCED_ACTIVITY_KIND &&
+    goalSyncedAt !== null &&
+    goalSyncedAt !== undefined &&
+    activity.createdAt < goalSyncedAt
+  ) {
+    return undefined;
+  }
+  if (
+    typeof requestStartedAt === "string" &&
+    goalSyncedAt !== null &&
+    goalSyncedAt !== undefined &&
+    goalSyncedAt.localeCompare(requestStartedAt) >= 0
+  ) {
+    return undefined;
+  }
+  const payloadGoal = (activity.payload as Record<string, unknown>).goal;
+  if (payloadGoal === null) {
+    return null;
+  }
+  const decoded = decodeThreadGoalSnapshot(payloadGoal);
+  return decoded._tag === "Some" ? decoded.value : undefined;
+}
 
 function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error") {
   if (status === "error") return "error" as const;
@@ -305,6 +349,7 @@ export function projectEvent(
             settledAt: null,
             snoozedUntil: null,
             snoozedAt: null,
+            goal: null,
             deletedAt: null,
             messages: [],
             activities: [],
@@ -789,11 +834,22 @@ export function projectEvent(
           ]
             .toSorted(compareThreadActivities)
             .slice(-500);
+          const goal = goalFromActivity(payload.activity, thread.goalSyncedAt);
+          const goalSyncedAt =
+            payload.activity.kind === THREAD_GOAL_SYNCED_ACTIVITY_KIND && goal !== undefined
+              ? thread.goalSyncedAt === undefined ||
+                thread.goalSyncedAt === null ||
+                payload.activity.createdAt > thread.goalSyncedAt
+                ? payload.activity.createdAt
+                : thread.goalSyncedAt
+              : thread.goalSyncedAt;
 
           return {
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
               activities,
+              ...(goal !== undefined ? { goal } : {}),
+              ...(goalSyncedAt !== undefined ? { goalSyncedAt } : {}),
               updatedAt: event.occurredAt,
             }),
           };

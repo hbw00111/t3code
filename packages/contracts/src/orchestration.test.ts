@@ -357,10 +357,12 @@ it.effect("decodes correlated thread goal activity payloads", () =>
       commandId: "cmd-goal-set",
       operation: "set",
       objective: "Finish the migration",
+      requestStartedAt: "2026-01-01T00:00:00.000Z",
     });
     assert.strictEqual(parsed.commandId, "cmd-goal-set");
     assert.strictEqual(parsed.operation, "set");
     assert.strictEqual(parsed.objective, "Finish the migration");
+    assert.strictEqual(parsed.requestStartedAt, "2026-01-01T00:00:00.000Z");
 
     const read = yield* decodeThreadGoalActivityPayload({
       commandId: "cmd-goal-get",
@@ -512,6 +514,7 @@ it.effect("defaults settled fields when decoding historical thread data", () =>
 
     assert.strictEqual(thread.settledOverride, null);
     assert.strictEqual(thread.settledAt, null);
+    assert.strictEqual(thread.goal, null);
     assert.strictEqual(shell.settledOverride, null);
     assert.strictEqual(shell.settledAt, null);
   }),

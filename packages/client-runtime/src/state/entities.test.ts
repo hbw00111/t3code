@@ -205,6 +205,7 @@ describe("environment entity projections", () => {
       title: "Cached thread",
       branch: "stale-branch",
       worktreePath: "/repo/stale-worktree",
+      goal: null,
       deletedAt: null,
       messages,
       proposedPlans: [],
@@ -320,6 +321,7 @@ describe("environment entity projections", () => {
     const otherValue = harness.registry.get(otherThreadDetailAtom);
     const detail = {
       ...THREAD_SHELL,
+      goal: null,
       deletedAt: null,
       messages: [],
       proposedPlans: [],

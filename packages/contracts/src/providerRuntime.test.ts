@@ -6,6 +6,39 @@ import { classifyTaskAgentKind, ProviderRuntimeEvent } from "./providerRuntime.t
 const decodeRuntimeEvent = Schema.decodeUnknownSync(ProviderRuntimeEvent);
 
 describe("ProviderRuntimeEvent", () => {
+  it("decodes thread goal updates and clears", () => {
+    const updated = decodeRuntimeEvent({
+      type: "thread.goal.updated",
+      eventId: "event-goal-updated",
+      provider: "codex",
+      createdAt: "2026-02-28T00:00:00.000Z",
+      threadId: "thread-1",
+      payload: {
+        goal: {
+          objective: "Ship goal projections",
+          status: "active",
+          tokensUsed: 42,
+          timeUsedSeconds: 9,
+          tokenBudget: 1_000,
+        },
+      },
+    });
+    const cleared = decodeRuntimeEvent({
+      type: "thread.goal.cleared",
+      eventId: "event-goal-cleared",
+      provider: "codex",
+      createdAt: "2026-02-28T00:00:01.000Z",
+      threadId: "thread-1",
+      payload: {},
+    });
+
+    expect(updated.type).toBe("thread.goal.updated");
+    if (updated.type === "thread.goal.updated") {
+      expect(updated.payload.goal.objective).toBe("Ship goal projections");
+    }
+    expect(cleared.type).toBe("thread.goal.cleared");
+  });
+
   it("accepts fork-provided driver kinds as branded slugs", () => {
     const parsed = decodeRuntimeEvent({
       type: "session.started",

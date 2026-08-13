@@ -146,17 +146,77 @@ describe("foldSubagentActivities", () => {
     expect(agents[0]!.completedAt).toBe("2026-08-01T11:00:00.000Z");
   });
 
-  it("reactivation increments the run count and clears result/error", () => {
-    const agents = fold([
-      activity("task.started", { taskId: "task-4", taskType: "local_agent" }),
-      activity("task.completed", { taskId: "task-4", status: "completed", summary: "run 1 done" }),
-      activity("task.updated", { taskId: "task-4", status: "running" }),
+  for (const status of ["pending", "waiting", "running"] as const) {
+    it(`starts a clean ${status} activation after a terminal run`, () => {
+      const reactivatedAt = "2026-08-01T11:00:03.000Z";
+      const [agent] = fold([
+        activity(
+          "task.started",
+          { taskId: `reactivated-${status}`, taskType: "local_agent" },
+          "2026-08-01T11:00:00.000Z",
+        ),
+        activity(
+          "task.progress",
+          { taskId: `reactivated-${status}`, summary: "old progress" },
+          "2026-08-01T11:00:01.000Z",
+        ),
+        activity(
+          "task.completed",
+          { taskId: `reactivated-${status}`, status: "completed", summary: "old result" },
+          "2026-08-01T11:00:02.000Z",
+        ),
+        activity("task.updated", { taskId: `reactivated-${status}`, status }, reactivatedAt),
+      ]);
+
+      expect(agent?.status).toBe(status);
+      expect(agent?.activationCount).toBe(2);
+      expect(agent?.progress).toBeNull();
+      expect(agent?.lastToolName).toBeNull();
+      expect(agent?.recentActivity).toEqual([]);
+      expect(agent?.result).toBeNull();
+      expect(agent?.error).toBeNull();
+      expect(agent?.completedAt).toBeNull();
+      expect(agent?.startedAt).toBe(status === "running" ? reactivatedAt : null);
+    });
+  }
+
+  it("counts a queued-to-running reactivation once and starts its timer when running", () => {
+    const [agent] = fold([
+      activity("task.started", { taskId: "queued-reactivation", taskType: "local_agent" }),
+      activity("task.progress", {
+        taskId: "queued-reactivation",
+        lastToolName: "old tool",
+        error: "old error",
+        outputFile: "/tmp/old-result.txt",
+      }),
+      activity("task.completed", {
+        taskId: "queued-reactivation",
+        status: "failed",
+        summary: "old failure",
+      }),
+      activity(
+        "task.updated",
+        { taskId: "queued-reactivation", status: "pending" },
+        "2026-08-01T12:00:00.000Z",
+      ),
+      activity(
+        "task.updated",
+        { taskId: "queued-reactivation", status: "waiting" },
+        "2026-08-01T12:00:01.000Z",
+      ),
+      activity(
+        "task.updated",
+        { taskId: "queued-reactivation", status: "running" },
+        "2026-08-01T12:00:02.000Z",
+      ),
     ]);
-    const agent = agents[0]!;
-    expect(agent.activationCount).toBe(2);
-    expect(agent.result).toBeNull();
-    expect(agent.completedAt).toBeNull();
-    expect(agent.status).toBe("running");
+
+    expect(agent?.status).toBe("running");
+    expect(agent?.activationCount).toBe(2);
+    expect(agent?.startedAt).toBe("2026-08-01T12:00:02.000Z");
+    expect(agent?.lastToolName).toBeNull();
+    expect(agent?.error).toBeNull();
+    expect(agent?.outputFile).toBeNull();
   });
 
   it("idle is nonterminal: an idle agent resumes without losing identity", () => {
@@ -240,7 +300,7 @@ describe("foldSubagentActivities", () => {
     expect(agents[0]!.title).toBe("Good");
   });
 
-  it("bounds repeated strings at 180 chars and the activity ring at 6 deduped entries", () => {
+  it("keeps current progress complete while bounding its activity history", () => {
     const long = "x".repeat(500);
     const rows = [activity("task.started", { taskId: "task-8", taskType: "local_agent" })];
     for (let i = 0; i < 10; i += 1) {
@@ -249,6 +309,7 @@ describe("foldSubagentActivities", () => {
     rows.push(activity("task.progress", { taskId: "task-8", summary: `${long}-9` }));
     const agents = fold(rows);
     const agent = agents[0]!;
+    expect(agent.progress).toBe(`${long}-9`);
     expect(agent.recentActivity.length).toBeLessThanOrEqual(6);
     for (const entry of agent.recentActivity) {
       expect(entry.summary.length).toBeLessThanOrEqual(180);
@@ -256,6 +317,240 @@ describe("foldSubagentActivities", () => {
     // Consecutive identical summaries dedupe (truncation makes them equal).
     const summaries = agent.recentActivity.map((entry) => entry.summary);
     expect(new Set(summaries).size).toBe(summaries.length);
+  });
+
+  it("folds attributed tool lifecycle rows into an existing agent", () => {
+    const agents = fold([
+      activity("task.started", { taskId: "tool-agent", title: "Tool worker" }),
+      activity(
+        "tool.started",
+        { agentId: "tool-agent", command: "pnpm test" },
+        "2026-08-01T10:01:00.000Z",
+      ),
+      activity(
+        "tool.updated",
+        { agentId: "tool-agent", data: { command: "pnpm typecheck" } },
+        "2026-08-01T10:02:00.000Z",
+      ),
+      activity(
+        "tool.completed",
+        { agentId: "tool-agent", title: "Read package.json" },
+        "2026-08-01T10:03:00.000Z",
+      ),
+    ]);
+
+    expect(agents).toHaveLength(1);
+    expect(agents[0]!.recentActivity.map((entry) => entry.summary)).toEqual([
+      "▸ pnpm test",
+      "▸ pnpm typecheck",
+      "▸ Read package.json",
+    ]);
+    expect(agents[0]!.lastToolName).toBe("Read package.json");
+    expect(agents[0]!.updatedAt).toBe("2026-08-01T10:03:00.000Z");
+  });
+
+  it("keeps the current attributed command complete while truncating its history entry", () => {
+    const longCommand = `pnpm exec vitest run ${"packages/client-runtime/src/state/".repeat(8)}subagentRuntime.test.ts`;
+    const toolStartedAt = "2026-08-01T10:04:00.000Z";
+    const [agent] = fold([
+      activity("task.started", { taskId: "long-command-agent", title: "Command worker" }),
+      activity(
+        "tool.started",
+        {
+          agentId: "long-command-agent",
+          data: { item: { input: { command: longCommand } } },
+        },
+        toolStartedAt,
+      ),
+    ]);
+
+    expect(longCommand.length).toBeGreaterThan(180);
+    expect(agent?.lastToolName).toBe(longCommand);
+    expect(agent?.progress).toBeNull();
+    expect(agent?.recentActivity).toHaveLength(1);
+    expect(agent?.recentActivity[0]?.at).toBe(toolStartedAt);
+    expect(agent?.recentActivity[0]?.summary).not.toContain(longCommand);
+    expect(agent?.recentActivity[0]?.summary).toHaveLength(180);
+    expect(agent?.recentActivity[0]?.summary.endsWith("…")).toBe(true);
+  });
+
+  it("lets the latest task progress or tool event own current activity", () => {
+    const [toolLatest] = fold([
+      activity("task.started", { taskId: "activity-owner-tool" }),
+      activity("task.progress", {
+        taskId: "activity-owner-tool",
+        summary: "Reviewing source",
+        lastToolName: "stale tool hint",
+      }),
+      activity("tool.started", {
+        agentId: "activity-owner-tool",
+        command: "rg -n TODO src",
+      }),
+    ]);
+
+    expect(toolLatest?.progress).toBeNull();
+    expect(toolLatest?.lastToolName).toBe("rg -n TODO src");
+    expect(toolLatest?.recentActivity.map((entry) => entry.summary)).toEqual([
+      "Reviewing source",
+      "▸ rg -n TODO src",
+    ]);
+
+    const [progressLatest] = fold([
+      activity("task.started", { taskId: "activity-owner-progress" }),
+      activity("tool.started", {
+        agentId: "activity-owner-progress",
+        command: "pnpm test",
+      }),
+      activity("task.progress", {
+        taskId: "activity-owner-progress",
+        summary: "Interpreting test results",
+      }),
+    ]);
+
+    expect(progressLatest?.progress).toBe("Interpreting test results");
+    expect(progressLatest?.lastToolName).toBeNull();
+    expect(progressLatest?.recentActivity.map((entry) => entry.summary)).toEqual([
+      "▸ pnpm test",
+      "Interpreting test results",
+    ]);
+  });
+
+  it("extracts projected nested commands and failed tool details", () => {
+    const agents = fold([
+      activity("task.started", { taskId: "nested-tool-agent" }),
+      activity("tool.updated", {
+        agentId: "nested-tool-agent",
+        title: "Terminal",
+        data: { item: { input: { command: "rg -n secret src" } } },
+      }),
+      activity("tool.completed", {
+        agentId: "nested-tool-agent",
+        status: "failed",
+        data: { item: { error: { message: "permission denied" } } },
+      }),
+    ]);
+
+    expect(agents[0]!.recentActivity.map((entry) => entry.summary)).toEqual([
+      "▸ rg -n secret src",
+      "▸ Error: permission denied",
+    ]);
+    expect(agents[0]!.lastToolName).toBe("Error: permission denied");
+  });
+
+  it("prefers failed tool detail over a generic tool title", () => {
+    const [agent] = fold([
+      activity("task.started", { taskId: "failed-tool-agent" }),
+      activity("tool.completed", {
+        agentId: "failed-tool-agent",
+        status: "failed",
+        title: "Tool",
+        detail: "process exited with code 2",
+      }),
+    ]);
+
+    expect(agent?.recentActivity.at(-1)?.summary).toBe("▸ Error: process exited with code 2");
+  });
+
+  it("extracts commands from projected data and provider state shapes", () => {
+    const [agent] = fold([
+      activity("task.started", { taskId: "projected-command-agent" }),
+      activity("tool.updated", {
+        agentId: "projected-command-agent",
+        data: { input: { command: ["pnpm", "test", "subagent runtime"] } },
+      }),
+      activity("tool.completed", {
+        agentId: "projected-command-agent",
+        data: { state: { input: { command: "pnpm typecheck" } } },
+      }),
+      activity("tool.completed", {
+        agentId: "projected-command-agent",
+        itemType: "command_execution",
+        title: "Ran command",
+        detail: "pnpm lint",
+      }),
+    ]);
+
+    expect(agent?.recentActivity.map((entry) => entry.summary)).toEqual([
+      '▸ pnpm test "subagent runtime"',
+      "▸ pnpm typecheck",
+      "▸ pnpm lint",
+    ]);
+  });
+
+  it("does not create an agent from attributed tool rows alone", () => {
+    expect(
+      fold([
+        activity("tool.started", { agentId: "missing-agent", command: "pnpm test" }),
+        activity("tool.updated", { agentId: "missing-agent", title: "Still running" }),
+        activity("tool.completed", { agentId: "missing-agent", title: "Done" }),
+      ]),
+    ).toHaveLength(0);
+  });
+
+  it("ignores tool activity that arrives after an agent has settled", () => {
+    const [agent] = fold([
+      activity("task.started", { taskId: "settled-tool-agent", title: "Settled worker" }),
+      activity(
+        "tool.started",
+        { agentId: "settled-tool-agent", command: "pnpm test" },
+        "2026-08-01T10:01:00.000Z",
+      ),
+      activity(
+        "task.completed",
+        {
+          taskId: "settled-tool-agent",
+          status: "completed",
+          summary: "Tests passed",
+        },
+        "2026-08-01T10:02:00.000Z",
+      ),
+      activity(
+        "tool.progress",
+        { taskId: "settled-tool-agent", toolName: "stale heartbeat" },
+        "2026-08-01T10:03:00.000Z",
+      ),
+      activity(
+        "tool.completed",
+        { agentId: "settled-tool-agent", command: "stale command" },
+        "2026-08-01T10:04:00.000Z",
+      ),
+    ]);
+
+    expect(agent).toMatchObject({
+      status: "completed",
+      result: "Tests passed",
+      lastToolName: "pnpm test",
+      completedAt: "2026-08-01T10:02:00.000Z",
+      updatedAt: "2026-08-01T10:02:00.000Z",
+    });
+    expect(agent?.recentActivity.map((entry) => entry.summary)).toEqual(["▸ pnpm test"]);
+  });
+
+  it("bounds and consecutively dedupes attributed tool activity", () => {
+    const longCommand = `printf ${"x".repeat(300)}`;
+    const rows = [activity("task.started", { taskId: "bounded-tool-agent" })];
+    for (let index = 0; index < 8; index += 1) {
+      rows.push(
+        activity("tool.completed", {
+          agentId: "bounded-tool-agent",
+          title: `Tool ${index}`,
+        }),
+      );
+    }
+    rows.push(
+      activity("tool.started", { agentId: "bounded-tool-agent", command: longCommand }),
+      activity("tool.updated", { agentId: "bounded-tool-agent", command: longCommand }),
+    );
+
+    const [agent] = fold(rows);
+    expect(agent?.lastToolName).toBe(longCommand);
+    expect(agent?.recentActivity).toHaveLength(6);
+    expect(agent?.recentActivity.every((entry) => entry.summary.length <= 180)).toBe(true);
+    expect(
+      agent?.recentActivity.filter((entry) => entry.summary.startsWith("▸ printf")),
+    ).toHaveLength(1);
+    expect(agent?.recentActivity.at(-1)?.summary).toHaveLength(180);
+    expect(new Set(agent?.recentActivity.map((entry) => entry.summary)).size).toBe(6);
   });
 
   it("plan tasks are not agents", () => {
@@ -519,7 +814,11 @@ describe("timeline predicates", () => {
     ]) {
       expect(isSubagentActivityKind(kind)).toBe(true);
     }
-    expect(isSubagentActivityKind("tool.completed")).toBe(false);
+    for (const kind of ["tool.started", "tool.updated", "tool.completed"]) {
+      // These are subagent fold inputs only when attributed; the kind alone
+      // must not hide ordinary parent-conversation tools from the timeline.
+      expect(isSubagentActivityKind(kind)).toBe(false);
+    }
   });
 
   it("attributed tool rows are re-homed; unattributed rows stay in the timeline", () => {
@@ -735,6 +1034,154 @@ describe("terminal robustness", () => {
       }),
     ]);
     expect(agents[0]!.activationCount).toBe(2);
+  });
+
+  for (const [kind, stalePayload] of [
+    ["task.started", { taskType: "local_agent" }],
+    ["task.progress", { status: "waiting", summary: "stale progress" }],
+    ["task.updated", { status: "failed", error: "stale failure" }],
+    ["task.completed", { status: "failed", summary: "stale result" }],
+  ] as const) {
+    it(`ignores stale workflow attempt metadata and state from ${kind}`, () => {
+      const [agent] = fold([
+        activity(
+          "task.progress",
+          {
+            taskId: "wf-stale-running:wf:0",
+            parentAgentId: "wf-stale-running",
+            status: "running",
+            attempt: 1,
+          },
+          "2026-08-01T10:00:00.000Z",
+        ),
+        activity(
+          "task.progress",
+          {
+            taskId: "wf-stale-running:wf:0",
+            parentAgentId: "wf-stale-running",
+            status: "failed",
+            attempt: 1,
+          },
+          "2026-08-01T10:01:00.000Z",
+        ),
+        activity(
+          "task.progress",
+          {
+            taskId: "wf-stale-running:wf:0",
+            parentAgentId: "wf-stale-running",
+            title: "Attempt 2",
+            role: "current-role",
+            model: "current-model",
+            phaseIndex: 2,
+            phaseTitle: "Current phase",
+            status: "running",
+            attempt: 2,
+          },
+          "2026-08-01T11:00:00.000Z",
+        ),
+        activity(
+          "task.progress",
+          {
+            taskId: "wf-stale-running:wf:0",
+            summary: "attempt 2 progress",
+            outputFile: "/tmp/attempt-2.txt",
+            attempt: 2,
+          },
+          "2026-08-01T11:01:00.000Z",
+        ),
+        activity(
+          kind,
+          {
+            taskId: "wf-stale-running:wf:0",
+            parentAgentId: "wf-stale-running",
+            title: "Stale attempt",
+            role: "stale-role",
+            model: "stale-model",
+            phaseIndex: 1,
+            phaseTitle: "Stale phase",
+            outputFile: "/tmp/stale.txt",
+            attempt: 1,
+            ...stalePayload,
+          },
+          "2026-08-01T12:00:00.000Z",
+        ),
+      ]);
+
+      expect(agent).toMatchObject({
+        status: "running",
+        activationCount: 2,
+        attempt: 2,
+        title: "Attempt 2",
+        role: "current-role",
+        model: "current-model",
+        phaseIndex: 2,
+        phaseTitle: "Current phase",
+        progress: "attempt 2 progress",
+        outputFile: "/tmp/attempt-2.txt",
+        result: null,
+        error: null,
+        completedAt: null,
+        updatedAt: "2026-08-01T11:01:00.000Z",
+      });
+    });
+  }
+
+  it("keeps a completed newer workflow attempt settled after stale progress", () => {
+    const [agent] = fold([
+      activity("task.progress", {
+        taskId: "wf-stale-completed:wf:0",
+        parentAgentId: "wf-stale-completed",
+        status: "running",
+        attempt: 1,
+      }),
+      activity("task.progress", {
+        taskId: "wf-stale-completed:wf:0",
+        status: "failed",
+        attempt: 1,
+      }),
+      activity("task.progress", {
+        taskId: "wf-stale-completed:wf:0",
+        title: "Attempt 2",
+        status: "running",
+        summary: "attempt 2 progress",
+        attempt: 2,
+      }),
+      activity(
+        "task.completed",
+        {
+          taskId: "wf-stale-completed:wf:0",
+          status: "completed",
+          summary: "attempt 2 result",
+          outputFile: "/tmp/attempt-2-result.txt",
+          attempt: 2,
+        },
+        "2026-08-01T11:00:00.000Z",
+      ),
+      activity(
+        "task.progress",
+        {
+          taskId: "wf-stale-completed:wf:0",
+          title: "Stale attempt",
+          status: "running",
+          summary: "stale progress",
+          outputFile: "/tmp/stale.txt",
+          attempt: 1,
+        },
+        "2026-08-01T12:00:00.000Z",
+      ),
+    ]);
+
+    expect(agent).toMatchObject({
+      status: "completed",
+      activationCount: 2,
+      attempt: 2,
+      title: "Attempt 2",
+      progress: "attempt 2 progress",
+      result: "attempt 2 result",
+      outputFile: "/tmp/attempt-2-result.txt",
+      completedAt: "2026-08-01T11:00:00.000Z",
+      updatedAt: "2026-08-01T11:00:00.000Z",
+    });
   });
 });
 

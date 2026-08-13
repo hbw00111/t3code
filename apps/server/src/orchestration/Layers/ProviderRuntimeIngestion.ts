@@ -18,6 +18,7 @@ import {
   type OrchestrationThread,
   type OrchestrationThreadActivity,
   type ProviderRuntimeEvent,
+  THREAD_GOAL_SYNCED_ACTIVITY_KIND,
 } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
@@ -368,6 +369,24 @@ export function runtimeEventToActivities(
       : {};
   })();
   switch (event.type) {
+    case "thread.goal.updated":
+    case "thread.goal.cleared":
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: THREAD_GOAL_SYNCED_ACTIVITY_KIND,
+          summary: "Thread goal synchronized",
+          payload: {
+            goal: event.type === "thread.goal.updated" ? event.payload.goal : null,
+            timelineBypass: true,
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+
     case "request.opened": {
       if (event.payload.requestType === "tool_user_input") {
         return [];

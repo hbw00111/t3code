@@ -44,6 +44,7 @@ function makeReadModel(
         archivedAt,
         settledOverride,
         settledAt: settledOverride === "settled" ? SETTLED_AT : null,
+        goal: null,
         deletedAt: null,
         messages,
         proposedPlans: [],

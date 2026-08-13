@@ -97,6 +97,13 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         snoozedUntil: null,
         snoozedAt: null,
         pinnedAt: null,
+        goal: {
+          objective: "Persist goal ordering",
+          status: "active",
+          tokensUsed: 10,
+          timeUsedSeconds: 2,
+        },
+        goalSyncedAt: "2026-03-24T00:00:01.000Z",
         latestUserMessageAt: null,
         pendingApprovalCount: 0,
         pendingUserInputCount: 0,
@@ -132,6 +139,13 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         instanceId: ProviderInstanceId.make("claudeAgent"),
         model: "claude-opus-4-6",
       });
+      assert.deepStrictEqual(Option.getOrNull(persisted)?.goal, {
+        objective: "Persist goal ordering",
+        status: "active",
+        tokensUsed: 10,
+        timeUsedSeconds: 2,
+      });
+      assert.strictEqual(Option.getOrNull(persisted)?.goalSyncedAt, "2026-03-24T00:00:01.000Z");
     }),
   );
 
@@ -160,6 +174,8 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         snoozedUntil: "2026-03-26T09:00:00.000Z",
         snoozedAt: "2026-03-25T00:00:00.000Z",
         pinnedAt: "2026-03-25T00:00:00.000Z",
+        goal: null,
+        goalSyncedAt: null,
         latestUserMessageAt: null,
         pendingApprovalCount: 0,
         pendingUserInputCount: 0,

@@ -14,11 +14,12 @@ import {
   ProjectionThreadRepository,
   type ProjectionThreadRepositoryShape,
 } from "../Services/ProjectionThreads.ts";
-import { ModelSelection } from "@t3tools/contracts";
+import { ModelSelection, ThreadGoalSnapshot } from "@t3tools/contracts";
 
 const ProjectionThreadDbRow = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
+    goal: Schema.NullOr(Schema.fromJsonString(ThreadGoalSnapshot)),
   }),
 );
 type ProjectionThreadDbRow = typeof ProjectionThreadDbRow.Type;
@@ -51,6 +52,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           pin_order_key,
           title_regeneration_request_id,
           title_regeneration_started_at,
+          goal_json,
+          goal_synced_at,
           latest_user_message_at,
           pending_approval_count,
           pending_user_input_count,
@@ -78,6 +81,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.pinOrderKey ?? null},
           ${row.titleRegenerationRequestId ?? null},
           ${row.titleRegenerationStartedAt ?? null},
+          ${row.goal == null ? null : JSON.stringify(row.goal)},
+          ${row.goalSyncedAt},
           ${row.latestUserMessageAt},
           ${row.pendingApprovalCount},
           ${row.pendingUserInputCount},
@@ -105,6 +110,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           pin_order_key = excluded.pin_order_key,
           title_regeneration_request_id = excluded.title_regeneration_request_id,
           title_regeneration_started_at = excluded.title_regeneration_started_at,
+          goal_json = excluded.goal_json,
+          goal_synced_at = excluded.goal_synced_at,
           latest_user_message_at = excluded.latest_user_message_at,
           pending_approval_count = excluded.pending_approval_count,
           pending_user_input_count = excluded.pending_user_input_count,
@@ -139,6 +146,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           pin_order_key AS "pinOrderKey",
           title_regeneration_request_id AS "titleRegenerationRequestId",
           title_regeneration_started_at AS "titleRegenerationStartedAt",
+          goal_json AS "goal",
+          goal_synced_at AS "goalSyncedAt",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
@@ -175,6 +184,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           pin_order_key AS "pinOrderKey",
           title_regeneration_request_id AS "titleRegenerationRequestId",
           title_regeneration_started_at AS "titleRegenerationStartedAt",
+          goal_json AS "goal",
+          goal_synced_at AS "goalSyncedAt",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",

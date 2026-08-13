@@ -22,6 +22,7 @@ import { normalizeModelSlug } from "@t3tools/shared/model";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
@@ -53,6 +54,7 @@ const BENIGN_ERROR_LOG_SNIPPETS = [
   "state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back",
 ];
 const CODEX_APP_SERVER_FORCE_KILL_AFTER = "2 seconds" as const;
+const CODEX_GOAL_REQUEST_TIMEOUT = "10 seconds" as const;
 const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
   "not found",
   "missing thread",
@@ -711,7 +713,7 @@ function rememberCollabReceiverTurns(
   }
 }
 
-function shouldSuppressChildConversationNotification(
+export function shouldSuppressChildConversationNotification(
   method: CodexRpc.ServerNotificationMethod,
 ): boolean {
   return (
@@ -722,11 +724,35 @@ function shouldSuppressChildConversationNotification(
     method === "thread/closed" ||
     method === "thread/compacted" ||
     method === "thread/name/updated" ||
+    method === "thread/goal/updated" ||
+    method === "thread/goal/cleared" ||
     method === "thread/tokenUsage/updated" ||
     method === "turn/started" ||
     method === "turn/completed" ||
     method === "turn/plan/updated" ||
     method === "item/plan/delta"
+  );
+}
+
+type CodexGoalRequestMethod = "thread/goal/get" | "thread/goal/set" | "thread/goal/clear";
+
+export function withCodexGoalRequestTimeout<A, E, R>(
+  method: CodexGoalRequestMethod,
+  request: Effect.Effect<A, E, R>,
+  timeout: Duration.Input = CODEX_GOAL_REQUEST_TIMEOUT,
+): Effect.Effect<A, E | CodexErrors.CodexAppServerRequestError, R> {
+  return request.pipe(
+    Effect.timeoutOrElse({
+      duration: timeout,
+      orElse: () =>
+        Effect.fail(
+          CodexErrors.CodexAppServerRequestError.internalError(
+            `Codex App Server request timed out for method '${method}'.`,
+            { timeoutMillis: Duration.toMillis(Duration.fromInputUnsafe(timeout)) },
+            { method, operation: "receive-response" },
+          ),
+        ),
+    }),
   );
 }
 
@@ -1828,45 +1854,60 @@ export const makeCodexSessionRuntime = (
       getGoal: () =>
         Effect.gen(function* () {
           const providerThreadId = yield* readProviderThreadId;
-          const response = yield* client.request("thread/goal/get", {
-            threadId: providerThreadId,
-          });
+          const response = yield* withCodexGoalRequestTimeout(
+            "thread/goal/get",
+            client.request("thread/goal/get", {
+              threadId: providerThreadId,
+            }),
+          );
           return response.goal ? toThreadGoalSnapshot(response.goal) : null;
         }),
       setGoal: (objective) =>
         Effect.gen(function* () {
           const providerThreadId = yield* readProviderThreadId;
-          const response = yield* client.request("thread/goal/set", {
-            threadId: providerThreadId,
-            objective,
-            status: "active",
-          });
+          const response = yield* withCodexGoalRequestTimeout(
+            "thread/goal/set",
+            client.request("thread/goal/set", {
+              threadId: providerThreadId,
+              objective,
+              status: "active",
+            }),
+          );
           return toThreadGoalSnapshot(response.goal);
         }),
       pauseGoal: () =>
         Effect.gen(function* () {
           const providerThreadId = yield* readProviderThreadId;
-          const response = yield* client.request("thread/goal/set", {
-            threadId: providerThreadId,
-            status: "paused",
-          });
+          const response = yield* withCodexGoalRequestTimeout(
+            "thread/goal/set",
+            client.request("thread/goal/set", {
+              threadId: providerThreadId,
+              status: "paused",
+            }),
+          );
           return toThreadGoalSnapshot(response.goal);
         }),
       resumeGoal: () =>
         Effect.gen(function* () {
           const providerThreadId = yield* readProviderThreadId;
-          const response = yield* client.request("thread/goal/set", {
-            threadId: providerThreadId,
-            status: "active",
-          });
+          const response = yield* withCodexGoalRequestTimeout(
+            "thread/goal/set",
+            client.request("thread/goal/set", {
+              threadId: providerThreadId,
+              status: "active",
+            }),
+          );
           return toThreadGoalSnapshot(response.goal);
         }),
       clearGoal: () =>
         Effect.gen(function* () {
           const providerThreadId = yield* readProviderThreadId;
-          yield* client.request("thread/goal/clear", {
-            threadId: providerThreadId,
-          });
+          yield* withCodexGoalRequestTimeout(
+            "thread/goal/clear",
+            client.request("thread/goal/clear", {
+              threadId: providerThreadId,
+            }),
+          );
           return null;
         }),
       interruptTurn: (turnId) =>

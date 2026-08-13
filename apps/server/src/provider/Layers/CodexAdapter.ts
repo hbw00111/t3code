@@ -17,6 +17,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderRequestKind,
   type ThreadTokenUsageSnapshot,
+  type ThreadGoalSnapshot,
   type ProviderUserInputAnswers,
   RuntimeItemId,
   RuntimeRequestId,
@@ -996,6 +997,41 @@ function mapToRuntimeEvents(
               }
             : {}),
         },
+      },
+    ];
+  }
+
+  if (event.method === "thread/goal/updated") {
+    const payload = readPayload(EffectCodexSchema.V2ThreadGoalUpdatedNotification, event.payload);
+    if (!payload) {
+      return [];
+    }
+    const goal: ThreadGoalSnapshot = {
+      objective: payload.goal.objective,
+      status: payload.goal.status,
+      tokensUsed: payload.goal.tokensUsed,
+      timeUsedSeconds: payload.goal.timeUsedSeconds,
+      ...(payload.goal.tokenBudget !== undefined ? { tokenBudget: payload.goal.tokenBudget } : {}),
+    };
+    return [
+      {
+        type: "thread.goal.updated",
+        ...runtimeEventBase(event, canonicalThreadId),
+        payload: { goal },
+      },
+    ];
+  }
+
+  if (event.method === "thread/goal/cleared") {
+    const payload = readPayload(EffectCodexSchema.V2ThreadGoalClearedNotification, event.payload);
+    if (!payload) {
+      return [];
+    }
+    return [
+      {
+        type: "thread.goal.cleared",
+        ...runtimeEventBase(event, canonicalThreadId),
+        payload: {},
       },
     ];
   }

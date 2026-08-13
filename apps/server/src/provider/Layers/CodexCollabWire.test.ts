@@ -154,6 +154,8 @@ describe("routeCodexChildNotification", () => {
       "thread/closed",
       "thread/compacted",
       "thread/name/updated",
+      "thread/goal/updated",
+      "thread/goal/cleared",
       "thread/tokenUsage/updated",
       "turn/started",
       "turn/completed",

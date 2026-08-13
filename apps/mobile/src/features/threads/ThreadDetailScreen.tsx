@@ -12,6 +12,7 @@ import type {
   ProviderInteractionMode,
   RuntimeMode,
   ServerConfig as T3ServerConfig,
+  ThreadGoalSnapshot,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Haptics from "expo-haptics";
@@ -40,6 +41,12 @@ import {
   ThreadComposer,
 } from "./ThreadComposer";
 import { ThreadFeed } from "./ThreadFeed";
+import {
+  estimateThreadLiveStatusHeight,
+  ThreadLiveStatusStrip,
+  type ThreadGoalAction,
+  type ThreadLivePlanStatus,
+} from "./ThreadLiveStatusStrip";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
 
 export interface ThreadDetailScreenProps {
@@ -64,6 +71,10 @@ export interface ThreadDetailScreenProps {
   /** Non-null when older turns exist beyond the loaded window. */
   readonly loadEarlier?: { readonly loading: boolean; readonly onLoadEarlier: () => void } | null;
   readonly activeThreadBusy: boolean;
+  readonly livePlan: ThreadLivePlanStatus | null;
+  readonly goal: ThreadGoalSnapshot | null;
+  readonly pendingGoalAction: ThreadGoalAction | null;
+  readonly goalControlsDisabled: boolean;
   readonly environmentId: EnvironmentId;
   readonly projectWorkspaceRoot: string | null;
   readonly threadCwd: string | null;
@@ -79,6 +90,10 @@ export interface ThreadDetailScreenProps {
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
   readonly onSendMessage: () => Promise<MessageId | null>;
+  readonly onSetGoal: (objective: string) => Promise<boolean>;
+  readonly onPauseGoal: () => Promise<boolean>;
+  readonly onResumeGoal: () => Promise<boolean>;
+  readonly onClearGoal: () => Promise<boolean>;
   readonly onReconnectEnvironment: () => void;
   readonly onUpdateThreadModelSelection: (modelSelection: ModelSelection) => void;
   readonly onUpdateThreadRuntimeMode: (runtimeMode: RuntimeMode) => void;
@@ -204,7 +219,9 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   const selectedThreadFeed = props.selectedThreadFeed;
   const composerChrome = composerExpanded ? COMPOSER_EXPANDED_CHROME : COMPOSER_COLLAPSED_CHROME;
   const composerOverlapHeight = composerChrome + composerBottomInset;
-  const estimatedOverlayHeight = composerOverlapHeight;
+  const estimatedOverlayHeight =
+    composerOverlapHeight +
+    estimateThreadLiveStatusHeight({ plan: props.livePlan, hasGoal: props.goal !== null });
   // The overlay's measured height includes the home-indicator inset (the
   // composer pads it), but contentInsetAdjustmentBehavior="automatic" makes
   // UIKit add the safe-area bottom to the content inset AGAIN — leaving a
@@ -417,6 +434,17 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                   ) : null}
                 </Animated.View>
               ) : null}
+              <ThreadLiveStatusStrip
+                key={selectedThreadKey}
+                plan={props.livePlan}
+                goal={props.goal}
+                pendingGoalAction={props.pendingGoalAction}
+                disabled={props.connectionStateLabel !== "connected" || props.goalControlsDisabled}
+                onSetGoal={props.onSetGoal}
+                onPauseGoal={props.onPauseGoal}
+                onResumeGoal={props.onResumeGoal}
+                onClearGoal={props.onClearGoal}
+              />
             </View>
 
             <ThreadComposer

@@ -17,6 +17,9 @@ import {
   type TurnId,
   type KeybindingCommand,
   OrchestrationThreadActivity,
+  THREAD_GOAL_READ_ACTIVITY_KIND,
+  THREAD_GOAL_UPDATED_ACTIVITY_KIND,
+  THREAD_GOAL_UPDATE_FAILED_ACTIVITY_KIND,
   ProviderInteractionMode,
   ProviderDriverKind,
   RuntimeMode,
@@ -161,7 +164,7 @@ import {
   GitBranchIcon,
   WifiOffIcon,
 } from "lucide-react";
-import { cn, randomHex } from "~/lib/utils";
+import { cn, newCommandId, randomHex } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
@@ -270,6 +273,7 @@ import {
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { resolveThreadPr } from "./ThreadStatusIndicators";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import { ComposerLiveStatusStrip, type ComposerPlanStatus } from "./chat/ComposerLiveStatusStrip";
 import { ThreadSyncStatusPill } from "./chat/ThreadSyncStatusPill";
 import {
   DRAFT_HERO_TRANSITION_ANIMATION_ID,
@@ -339,6 +343,11 @@ import {
   resolveServerSelfUpdateCapability,
 } from "../versionSkew";
 import { useAssetUrls } from "../assets/assetUrls";
+import {
+  type ThreadGoalAction,
+  type ThreadGoalEditorSession,
+  useGoalCommandStateStore,
+} from "../goalCommandStateStore";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
@@ -458,6 +467,24 @@ type EnvironmentUnavailableState = {
   readonly label: string;
   readonly connection: EnvironmentConnectionPresentation;
 };
+
+type EnvironmentConnectionSnapshot = ReadonlyMap<
+  EnvironmentId,
+  EnvironmentConnectionPresentation["phase"]
+>;
+
+export function clearPendingGoalCommandsAfterConnectionLoss(input: {
+  readonly previous: EnvironmentConnectionSnapshot | null;
+  readonly current: EnvironmentConnectionSnapshot;
+  readonly clearEnvironment: (environmentId: EnvironmentId) => void;
+}): void {
+  if (input.previous === null) return;
+  for (const [environmentId, previousPhase] of input.previous) {
+    if (previousPhase === "connected" && input.current.get(environmentId) !== "connected") {
+      input.clearEnvironment(environmentId);
+    }
+  }
+}
 
 function eventPathContainsSelector(event: Event, selector: string): boolean {
   const path = event.composedPath();
@@ -1340,6 +1367,22 @@ function ChatViewContent(props: ChatViewProps) {
   >({});
   const [isConnecting, _setIsConnecting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
+  const pendingGoalCommand = useGoalCommandStateStore(
+    (state) => state.pendingByThreadKey[routeThreadKey] ?? null,
+  );
+  const goalEditorSession = useGoalCommandStateStore(
+    (state) => state.editorByThreadKey[routeThreadKey] ?? null,
+  );
+  const beginPendingGoalCommand = useGoalCommandStateStore((state) => state.begin);
+  const clearPendingGoalCommand = useGoalCommandStateStore((state) => state.clear);
+  const clearPendingGoalCommandsForEnvironment = useGoalCommandStateStore(
+    (state) => state.clearEnvironment,
+  );
+  const setGoalEditorSession = useGoalCommandStateStore((state) => state.setEditor);
+  const updateGoalEditorSession = useCallback(
+    (session: ThreadGoalEditorSession | null) => setGoalEditorSession(routeThreadKey, session),
+    [routeThreadKey, setGoalEditorSession],
+  );
   const [maximizedRightPanelThreadKey, setMaximizedRightPanelThreadKey] = useState<string | null>(
     null,
   );
@@ -1744,6 +1787,25 @@ function ChatViewContent(props: ChatViewProps) {
   const activeEnvironmentConnectionPhase = activeEnvironment?.connection.phase ?? "available";
   const activeEnvironmentUnavailable =
     activeEnvironment !== null && activeEnvironmentConnectionPhase !== "connected";
+  const environmentConnectionSnapshot = useMemo<EnvironmentConnectionSnapshot>(
+    () =>
+      new Map(
+        environments.map((environment) => [
+          environment.environmentId,
+          environment.connection.phase,
+        ]),
+      ),
+    [environments],
+  );
+  const previousEnvironmentConnectionsRef = useRef<EnvironmentConnectionSnapshot | null>(null);
+  useEffect(() => {
+    clearPendingGoalCommandsAfterConnectionLoss({
+      previous: previousEnvironmentConnectionsRef.current,
+      current: environmentConnectionSnapshot,
+      clearEnvironment: clearPendingGoalCommandsForEnvironment,
+    });
+    previousEnvironmentConnectionsRef.current = environmentConnectionSnapshot;
+  }, [clearPendingGoalCommandsForEnvironment, environmentConnectionSnapshot]);
   const activeReconnectingEnvironmentId =
     activeEnvironmentConnectionPhase === "connecting" ||
     activeEnvironmentConnectionPhase === "reconnecting"
@@ -2296,6 +2358,14 @@ function ChatViewContent(props: ChatViewProps) {
     threadError,
   });
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  const composerPlanStatus = useMemo<ComposerPlanStatus | null>(() => {
+    if (!isWorking || !workingStepLabel || !activePlan) return null;
+    return {
+      currentStep: workingStepLabel,
+      completedSteps: activePlan.steps.filter((step) => step.status === "completed").length,
+      totalSteps: activePlan.steps.length,
+    };
+  }, [activePlan, isWorking, workingStepLabel]);
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -2781,6 +2851,127 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeServerThread, draftId, routeThreadKey, routeThreadRef],
   );
+
+  useEffect(() => {
+    const pending = pendingGoalCommand;
+    if (!pending) return;
+    const receipt = threadActivities.findLast((activity) => {
+      if (
+        activity.kind !== THREAD_GOAL_UPDATED_ACTIVITY_KIND &&
+        activity.kind !== THREAD_GOAL_READ_ACTIVITY_KIND &&
+        activity.kind !== THREAD_GOAL_UPDATE_FAILED_ACTIVITY_KIND
+      ) {
+        return false;
+      }
+      if (typeof activity.payload !== "object" || activity.payload === null) return false;
+      return (activity.payload as Record<string, unknown>).commandId === pending.commandId;
+    });
+    if (!receipt) return;
+
+    clearPendingGoalCommand(routeThreadKey, pending.commandId);
+    if (receipt.kind === THREAD_GOAL_UPDATE_FAILED_ACTIVITY_KIND) {
+      const detail =
+        typeof receipt.payload === "object" && receipt.payload !== null
+          ? (receipt.payload as Record<string, unknown>).detail
+          : null;
+      setThreadError(
+        activeThread?.id ?? null,
+        typeof detail === "string" ? detail : t("chat.goalCommandFailed"),
+      );
+    }
+  }, [
+    activeThread?.id,
+    clearPendingGoalCommand,
+    pendingGoalCommand,
+    routeThreadKey,
+    setThreadError,
+    t,
+    threadActivities,
+  ]);
+
+  const runGoalAction = useCallback(
+    async (action: Exclude<ThreadGoalAction, "get">, objective?: string): Promise<boolean> => {
+      if (
+        !activeThread ||
+        !isServerThread ||
+        pendingGoalCommand !== null ||
+        sendInFlightRef.current ||
+        isSendBusy ||
+        isConnecting ||
+        threadDetailLoading ||
+        activeEnvironmentUnavailable ||
+        !providerSupportsThreadGoals(selectedProvider)
+      ) {
+        return false;
+      }
+      if (action === "set" && objective === undefined) return false;
+
+      const commandId = newCommandId();
+      if (!beginPendingGoalCommand(routeThreadKey, { commandId, action })) return false;
+      setThreadError(activeThread.id, null);
+
+      const result =
+        action === "set" && objective !== undefined
+          ? await setThreadGoal({
+              environmentId,
+              input: { threadId: activeThread.id, objective, commandId },
+            })
+          : action === "pause"
+            ? await pauseThreadGoal({
+                environmentId,
+                input: { threadId: activeThread.id, commandId },
+              })
+            : action === "resume"
+              ? await resumeThreadGoal({
+                  environmentId,
+                  input: { threadId: activeThread.id, commandId },
+                })
+              : await clearThreadGoal({
+                  environmentId,
+                  input: { threadId: activeThread.id, commandId },
+                });
+
+      if (result._tag !== "Failure") return true;
+      clearPendingGoalCommand(routeThreadKey, commandId);
+      if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          activeThread.id,
+          error instanceof Error ? error.message : t("chat.goalCommandFailed"),
+        );
+      }
+      return false;
+    },
+    [
+      activeEnvironmentUnavailable,
+      activeThread,
+      beginPendingGoalCommand,
+      clearThreadGoal,
+      clearPendingGoalCommand,
+      environmentId,
+      isConnecting,
+      isSendBusy,
+      isServerThread,
+      pauseThreadGoal,
+      pendingGoalCommand,
+      resumeThreadGoal,
+      routeThreadKey,
+      selectedProvider,
+      setThreadError,
+      setThreadGoal,
+      t,
+      threadDetailLoading,
+    ],
+  );
+
+  const goalControlsDisabled =
+    !isServerThread ||
+    isSendBusy ||
+    sendInFlightRef.current ||
+    isConnecting ||
+    threadDetailLoading ||
+    activeEnvironmentUnavailable ||
+    !providerSupportsThreadGoals(selectedProvider);
 
   const focusComposer = useCallback(() => {
     composerRef.current?.focusAtEnd();
@@ -4976,6 +5167,9 @@ function ChatViewContent(props: ChatViewProps) {
         );
         return;
       }
+      if (pendingGoalCommand !== null) {
+        return;
+      }
       if (goalCommand.action !== "set" && !isServerThread) {
         toastManager.add(
           stackedThreadToast({
@@ -5011,9 +5205,17 @@ function ChatViewContent(props: ChatViewProps) {
       }
 
       const createdAt = new Date().toISOString();
+      const goalCommandId = newCommandId();
+      const goalAction: ThreadGoalAction = goalCommand.action;
       const shouldTrackBootstrap =
         goalCommand.action === "set" && (isLocalDraftThread || baseBranchForGoalWorktree !== null);
       sendInFlightRef.current = true;
+      if (
+        !beginPendingGoalCommand(routeThreadKey, { commandId: goalCommandId, action: goalAction })
+      ) {
+        sendInFlightRef.current = false;
+        return;
+      }
       if (shouldTrackBootstrap) {
         beginLocalDispatch({ preparingWorktree: baseBranchForGoalWorktree !== null });
       }
@@ -5023,7 +5225,7 @@ function ChatViewContent(props: ChatViewProps) {
         goalCommand.action === "get"
           ? await getThreadGoal({
               environmentId,
-              input: { threadId: threadIdForGoal },
+              input: { threadId: threadIdForGoal, commandId: goalCommandId },
             })
           : goalCommand.action === "set"
             ? await setThreadGoal({
@@ -5031,6 +5233,7 @@ function ChatViewContent(props: ChatViewProps) {
                 input: {
                   threadId: threadIdForGoal,
                   objective: goalCommand.objective,
+                  commandId: goalCommandId,
                   ...((isLocalDraftThread || baseBranchForGoalWorktree) && {
                     bootstrap: {
                       ...(isLocalDraftThread
@@ -5071,20 +5274,21 @@ function ChatViewContent(props: ChatViewProps) {
             : goalCommand.action === "pause"
               ? await pauseThreadGoal({
                   environmentId,
-                  input: { threadId: threadIdForGoal },
+                  input: { threadId: threadIdForGoal, commandId: goalCommandId },
                 })
               : goalCommand.action === "resume"
                 ? await resumeThreadGoal({
                     environmentId,
-                    input: { threadId: threadIdForGoal },
+                    input: { threadId: threadIdForGoal, commandId: goalCommandId },
                   })
                 : await clearThreadGoal({
                     environmentId,
-                    input: { threadId: threadIdForGoal },
+                    input: { threadId: threadIdForGoal, commandId: goalCommandId },
                   });
 
       sendInFlightRef.current = false;
       if (goalResult._tag === "Failure") {
+        clearPendingGoalCommand(routeThreadKey, goalCommandId);
         if (shouldTrackBootstrap) {
           resetLocalDispatch();
         }
@@ -6407,6 +6611,20 @@ function ChatViewContent(props: ChatViewProps) {
                   {threadSyncPhase && !activeEnvironmentUnavailable ? (
                     <ThreadSyncStatusPill phase={threadSyncPhase} />
                   ) : null}
+                  <ComposerLiveStatusStrip
+                    key={routeThreadKey}
+                    plan={composerPlanStatus}
+                    goalStateReady={isServerThread && !threadDetailLoading}
+                    goal={isServerThread && !threadDetailLoading ? activeThread.goal : null}
+                    editorSession={goalEditorSession}
+                    pendingGoalAction={pendingGoalCommand?.action ?? null}
+                    disabled={goalControlsDisabled}
+                    onSetGoal={(objective) => runGoalAction("set", objective)}
+                    onEditorSessionChange={updateGoalEditorSession}
+                    onPauseGoal={() => void runGoalAction("pause")}
+                    onResumeGoal={() => void runGoalAction("resume")}
+                    onClearGoal={() => void runGoalAction("clear")}
+                  />
                   <div
                     className="relative"
                     style={

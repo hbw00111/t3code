@@ -97,6 +97,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     archivedAt: null,
     settledOverride: null,
     settledAt: null,
+    goal: null,
     deletedAt: null,
     latestTurn: null,
     branch: null,

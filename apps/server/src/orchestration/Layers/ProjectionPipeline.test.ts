@@ -241,6 +241,124 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
   );
 });
 
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-goal-rpc-race-")))(
+  "OrchestrationProjectionPipeline goal ordering",
+  (it) => {
+    it.effect("does not restore a goal from an RPC response older than a synced clear", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const requestStartedAt = "2026-01-01T00:00:01.000Z";
+        const syncedAt = "2026-01-01T00:00:02.000Z";
+        const receiptAt = "2026-01-01T00:00:03.000Z";
+
+        yield* eventStore.append({
+          type: "thread.created",
+          eventId: EventId.make("evt-goal-race-create"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-goal-race"),
+          occurredAt: requestStartedAt,
+          commandId: CommandId.make("cmd-goal-race-create"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-goal-race-create"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.make("thread-goal-race"),
+            projectId: ProjectId.make("project-goal-race"),
+            title: "Goal race",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt: requestStartedAt,
+            updatedAt: requestStartedAt,
+          },
+        });
+        yield* eventStore.append({
+          type: "thread.activity-appended",
+          eventId: EventId.make("evt-goal-race-sync"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-goal-race"),
+          occurredAt: syncedAt,
+          commandId: CommandId.make("provider:goal-race-sync"),
+          causationEventId: null,
+          correlationId: CommandId.make("provider:goal-race-sync"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.make("thread-goal-race"),
+            activity: {
+              id: EventId.make("activity-goal-race-sync"),
+              tone: "info",
+              kind: "provider.thread.goal.synced",
+              summary: "Thread goal synchronized",
+              payload: { goal: null, timelineBypass: true },
+              turnId: null,
+              createdAt: syncedAt,
+            },
+          },
+        });
+        yield* eventStore.append({
+          type: "thread.activity-appended",
+          eventId: EventId.make("evt-goal-race-receipt"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-goal-race"),
+          occurredAt: receiptAt,
+          commandId: CommandId.make("provider:goal-race-receipt"),
+          causationEventId: null,
+          correlationId: CommandId.make("provider:goal-race-receipt"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.make("thread-goal-race"),
+            activity: {
+              id: EventId.make("activity-goal-race-receipt"),
+              tone: "info",
+              kind: "provider.thread.goal.read",
+              summary: "Thread goal status",
+              payload: {
+                commandId: CommandId.make("cmd-goal-race-get"),
+                operation: "get",
+                requestStartedAt,
+                goal: {
+                  objective: "Stale goal",
+                  status: "active",
+                  tokensUsed: 1,
+                  timeUsedSeconds: 1,
+                },
+              },
+              turnId: null,
+              createdAt: receiptAt,
+            },
+          },
+        });
+
+        yield* projectionPipeline.bootstrap;
+
+        const threadRows = yield* sql<{
+          readonly goalJson: string | null;
+          readonly goalSyncedAt: string | null;
+        }>`
+          SELECT
+            goal_json AS "goalJson",
+            goal_synced_at AS "goalSyncedAt"
+          FROM projection_threads
+          WHERE thread_id = 'thread-goal-race'
+        `;
+        assert.deepEqual(threadRows, [{ goalJson: null, goalSyncedAt: syncedAt }]);
+        const receiptRows = yield* sql<{ readonly activityId: string }>`
+          SELECT activity_id AS "activityId"
+          FROM projection_thread_activities
+          WHERE activity_id = 'activity-goal-race-receipt'
+        `;
+        assert.deepEqual(receiptRows, [{ activityId: "activity-goal-race-receipt" }]);
+      }),
+    );
+  },
+);
+
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-base-")))(
   "OrchestrationProjectionPipeline",
   (it) => {

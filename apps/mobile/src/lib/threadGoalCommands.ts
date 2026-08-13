@@ -1,4 +1,12 @@
-import type { EnvironmentId, ServerProviderSlashCommand, ThreadId } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  ServerProvider,
+  ServerProviderSlashCommand,
+  ThreadId,
+} from "@t3tools/contracts";
+import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 
 export type ComposerGoalCommand =
   | { readonly action: "get" }
@@ -35,6 +43,30 @@ type ThreadComposerBuiltInSlashCommandItem = Extract<
 
 export function providerSupportsThreadGoals(providerDriver: string | null | undefined): boolean {
   return providerDriver === "codex";
+}
+
+export function canExecuteThreadGoalCommand(input: {
+  readonly connectionState: EnvironmentConnectionPhase | undefined;
+  readonly providerDriver: string | null | undefined;
+}): boolean {
+  return input.connectionState === "connected" && providerSupportsThreadGoals(input.providerDriver);
+}
+
+export function resolveThreadGoalProviderDriver(input: {
+  readonly sessionProviderInstanceId?: ProviderInstanceId | null;
+  readonly modelSelectionInstanceId?: ProviderInstanceId | null;
+  readonly providers:
+    | ReadonlyArray<Pick<ServerProvider, "instanceId" | "driver">>
+    | null
+    | undefined;
+}): ProviderDriverKind | null {
+  const providerInstanceId =
+    input.sessionProviderInstanceId ?? input.modelSelectionInstanceId ?? null;
+  if (providerInstanceId === null) return null;
+
+  return (
+    input.providers?.find((provider) => provider.instanceId === providerInstanceId)?.driver ?? null
+  );
 }
 
 export function buildThreadComposerSlashCommandItems(input: {

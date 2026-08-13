@@ -2,7 +2,9 @@ import * as NodeAssert from "node:assert/strict";
 
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
+import * as TestClock from "effect/testing/TestClock";
 import { describe } from "vite-plus/test";
 import { DEFAULT_MODEL, ThreadId } from "@t3tools/contracts";
 import * as CodexErrors from "effect-codex-app-server/errors";
@@ -19,6 +21,8 @@ import {
   hasConfiguredMcpServer,
   isRecoverableThreadResumeError,
   openCodexThread,
+  shouldSuppressChildConversationNotification,
+  withCodexGoalRequestTimeout,
 } from "./CodexSessionRuntime.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
 
@@ -37,6 +41,36 @@ describe("CodexSessionRuntimeIdentifierGenerationError", () => {
       "Failed to generate Codex App Server identifier for provider-event.",
     );
   });
+});
+
+describe("Codex goal runtime boundaries", () => {
+  it("suppresses goal notifications from child conversations", () => {
+    NodeAssert.equal(shouldSuppressChildConversationNotification("thread/goal/updated"), true);
+    NodeAssert.equal(shouldSuppressChildConversationNotification("thread/goal/cleared"), true);
+  });
+
+  it.effect("times out a stalled goal RPC with the existing Codex request error", () =>
+    Effect.gen(function* () {
+      const request = yield* withCodexGoalRequestTimeout(
+        "thread/goal/get",
+        Effect.never,
+        "10 millis",
+      ).pipe(Effect.exit, Effect.forkChild({ startImmediately: true }));
+      yield* TestClock.adjust("10 millis");
+      const exit = yield* Fiber.join(request);
+
+      NodeAssert.equal(exit._tag, "Failure");
+      if (exit._tag === "Failure") {
+        const failure = exit.cause.reasons.find((reason) => reason._tag === "Fail");
+        NodeAssert.equal(failure?._tag, "Fail");
+        if (failure?._tag === "Fail") {
+          NodeAssert.equal(failure.error._tag, "CodexAppServerRequestError");
+          NodeAssert.equal(failure.error.method, "thread/goal/get");
+          NodeAssert.match(failure.error.message, /timed out/);
+        }
+      }
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
 });
 
 function makeThreadOpenResponse(

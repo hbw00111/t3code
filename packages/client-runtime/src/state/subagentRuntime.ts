@@ -105,7 +105,7 @@ export function isActiveSubagentStatus(status: RuntimeSubagentStatus): boolean {
 }
 
 const RECENT_ACTIVITY_LIMIT = 6;
-const SUMMARY_CHAR_LIMIT = 180;
+const ACTIVITY_HISTORY_CHAR_LIMIT = 180;
 const ROSTER_LIMIT = 100;
 
 /**
@@ -121,7 +121,9 @@ export function isBackgroundTaskActivity(payload: Record<string, unknown>): bool
 }
 
 function bounded(value: string): string {
-  return value.length <= SUMMARY_CHAR_LIMIT ? value : `${value.slice(0, SUMMARY_CHAR_LIMIT - 1)}…`;
+  return value.length <= ACTIVITY_HISTORY_CHAR_LIMIT
+    ? value
+    : `${value.slice(0, ACTIVITY_HISTORY_CHAR_LIMIT - 1)}…`;
 }
 
 /** Appends to the ring buffer, deduping consecutive identical summaries. */
@@ -140,6 +142,118 @@ function appendActivity(
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function asCommand(value: unknown): string | undefined {
+  const direct = asString(value);
+  if (direct) {
+    return direct;
+  }
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const parts = value.map(asString).filter((part): part is string => part !== undefined);
+  return parts.length > 0
+    ? parts
+        .map((part) => (/\s|["'`]/.test(part) ? `"${part.replaceAll('"', '\\"')}"` : part))
+        .join(" ")
+    : undefined;
+}
+
+function asErrorDetail(value: unknown): string | undefined {
+  const direct = asString(value);
+  if (direct) {
+    return direct;
+  }
+  const record = asRecord(value);
+  return record
+    ? (asString(record.message) ?? asString(record.detail) ?? asString(record.error))
+    : undefined;
+}
+
+function attributedToolSummary(
+  activity: OrchestrationThreadActivity,
+  payload: Record<string, unknown>,
+): string | undefined {
+  const data = asRecord(payload.data);
+  const item = asRecord(data?.item);
+  const dataInput = asRecord(data?.input);
+  const itemInput = asRecord(item?.input);
+  const itemResult = asRecord(item?.result);
+  const state = asRecord(data?.state);
+  const stateInput = asRecord(state?.input);
+  const itemType = asString(payload.itemType);
+  const dataKind = asString(data?.kind)?.toLowerCase();
+  const heading = asString(payload.title)?.toLowerCase();
+  const commandDetail =
+    itemType === "command_execution" ||
+    dataKind === "execute" ||
+    heading === "terminal" ||
+    heading === "ran command"
+      ? payload.detail
+      : undefined;
+
+  const command = [
+    payload.command,
+    data?.command,
+    dataInput?.command,
+    item?.command,
+    itemInput?.command,
+    itemResult?.command,
+    state?.command,
+    stateInput?.command,
+    commandDetail,
+  ]
+    .map(asCommand)
+    .find((candidate) => candidate !== undefined);
+  if (command) {
+    return command;
+  }
+
+  const error = [payload.error, data?.error, item?.error, itemResult?.error, state?.error]
+    .map(asErrorDetail)
+    .find((candidate) => candidate !== undefined);
+  const status =
+    asString(payload.status) ?? asString(item?.status) ?? asString(state?.status) ?? undefined;
+  if (error && (status === "failed" || status === "error" || activity.tone === "error")) {
+    return `Error: ${error}`;
+  }
+  const failedDetail =
+    status === "failed" || status === "error" || activity.tone === "error"
+      ? asString(payload.detail)
+      : undefined;
+  if (failedDetail) {
+    return `Error: ${failedDetail}`;
+  }
+
+  const toolName = [
+    payload.title,
+    payload.toolName,
+    payload.name,
+    data?.title,
+    data?.toolName,
+    data?.tool,
+    data?.name,
+    item?.title,
+    item?.tool,
+    item?.name,
+    state?.title,
+    state?.name,
+  ]
+    .map(asString)
+    .find((candidate) => candidate !== undefined);
+  return (
+    toolName ??
+    (error ? `Error: ${error}` : undefined) ??
+    asString(payload.detail) ??
+    activity.summary
+  );
 }
 
 function asCount(value: unknown): number | undefined {
@@ -338,16 +452,6 @@ function fillMetadata(agent: MutableAgent, payload: Record<string, unknown>): vo
   if (phaseTitle) agent.phaseTitle = phaseTitle;
   const attempt = asCount(payload.attempt);
   if (attempt !== undefined) {
-    // A new attempt on a workflow slot is a reactivation of the same
-    // identity: clear the previous attempt's terminal detail so the status
-    // transition (terminal → running, in applyStatus) reads as a fresh run.
-    // The activation bump lives ONLY in applyStatus — bumping here too
-    // counted every retry twice (review finding: two attempts read "run 3").
-    if (agent.attempt !== null && attempt > agent.attempt) {
-      agent.result = null;
-      agent.error = null;
-      agent.completedAt = null;
-    }
     agent.attempt = attempt;
   }
   const outputFile = asString(payload.outputFile);
@@ -391,6 +495,11 @@ function fillMetadata(agent: MutableAgent, payload: Record<string, unknown>): vo
   }
 }
 
+function isStaleAttempt(agent: MutableAgent, payload: Record<string, unknown>): boolean {
+  const attempt = asCount(payload.attempt);
+  return attempt !== undefined && agent.attempt !== null && attempt < agent.attempt;
+}
+
 function applyStatus(agent: MutableAgent, status: RuntimeSubagentStatus, at: string): void {
   const wasTerminal = isTerminalSubagentStatus(agent.status);
   const isTerminal = isTerminalSubagentStatus(status);
@@ -399,16 +508,19 @@ function applyStatus(agent: MutableAgent, status: RuntimeSubagentStatus, at: str
     // don't slide.
     return;
   }
-  if ((wasTerminal || agent.status === "idle") && (status === "running" || status === "pending")) {
-    // Reactivation: same identity, new run. Clear the previous run's terminal
-    // detail so a live card never shows the prior run's output.
+  if ((wasTerminal || agent.status === "idle") && isActiveSubagentStatus(status)) {
+    // Reactivation: same identity, fresh activation-scoped state. Pending and
+    // waiting have not started executing yet; a later running event owns the
+    // new start time.
     agent.activationCount += 1;
+    agent.progress = null;
+    agent.lastToolName = null;
     agent.result = null;
     agent.error = null;
+    agent.outputFile = null;
+    agent.recentActivity = [];
+    agent.startedAt = status === "running" ? at : null;
     agent.completedAt = null;
-    if (status === "running") {
-      agent.startedAt = at;
-    }
   }
   if (status === "running" && agent.startedAt === null) {
     agent.startedAt = at;
@@ -478,6 +590,7 @@ export function foldSubagentActivities(
         // not the Agents surface (a "Run 12s stall" shell is not a subagent).
         if (isBackgroundTaskActivity(payload)) break;
         const agent = getOrCreate(agents, taskId, payload, at);
+        if (isStaleAttempt(agent, payload)) break;
         fillMetadata(agent, payload);
         // Order-robustness: a start row arriving after a terminal state is a
         // late/out-of-order delivery and only fills metadata — it must not
@@ -507,6 +620,7 @@ export function foldSubagentActivities(
         const existed = agents.has(taskId);
         if (!existed && isBackgroundTaskActivity(payload)) break;
         const agent = getOrCreate(agents, taskId, payload, at);
+        if (isStaleAttempt(agent, payload)) break;
         fillMetadata(agent, payload);
         if (agent.activationCount === 0) agent.activationCount = 1;
         const explicitStatus = asRuntimeStatus(payload.status);
@@ -521,13 +635,14 @@ export function foldSubagentActivities(
         }
         const summary = asString(payload.summary);
         if (summary) {
-          agent.progress = bounded(summary);
+          agent.progress = summary;
+          agent.lastToolName = null;
           agent.recentActivity = appendActivity(agent.recentActivity, at, summary);
-        }
-        const lastToolName = asString(payload.lastToolName);
-        if (lastToolName) {
-          agent.lastToolName = lastToolName;
-          if (!summary) {
+        } else {
+          const lastToolName = asString(payload.lastToolName);
+          if (lastToolName) {
+            agent.progress = null;
+            agent.lastToolName = lastToolName;
             agent.recentActivity = appendActivity(agent.recentActivity, at, `▸ ${lastToolName}`);
           }
         }
@@ -545,6 +660,7 @@ export function foldSubagentActivities(
         // first row's classification instead of being re-judged.
         if (!agents.has(taskId) && isBackgroundTaskActivity(payload)) break;
         const agent = getOrCreate(agents, taskId, payload, at);
+        if (isStaleAttempt(agent, payload)) break;
         fillMetadata(agent, payload);
         // A task first seen via task.updated (start row aged out) has run at
         // least once — zero activations would misreport "run 0" and let a
@@ -573,6 +689,7 @@ export function foldSubagentActivities(
         // first row's classification instead of being re-judged.
         if (!agents.has(taskId) && isBackgroundTaskActivity(payload)) break;
         const agent = getOrCreate(agents, taskId, payload, at);
+        if (isStaleAttempt(agent, payload)) break;
         fillMetadata(agent, payload);
         if (agent.activationCount === 0) agent.activationCount = 1;
         // Already-terminal: status and timestamps are frozen (first write
@@ -613,10 +730,31 @@ export function foldSubagentActivities(
         if (!taskId) break;
         const agent = agents.get(taskId);
         if (!agent) break;
+        if (isTerminalSubagentStatus(agent.status)) break;
         const toolName = asString(payload.toolName);
         if (toolName) {
+          agent.progress = null;
           agent.lastToolName = toolName;
           agent.recentActivity = appendActivity(agent.recentActivity, at, `▸ ${toolName}`);
+        }
+        agent.updatedAt = at;
+        break;
+      }
+      case "tool.started":
+      case "tool.updated":
+      case "tool.completed": {
+        const agentId = asString(payload.agentId);
+        if (!agentId) break;
+        // Attributed tool rows enrich a known agent, but never establish roster
+        // membership on their own. The task lifecycle remains authoritative.
+        const agent = agents.get(agentId);
+        if (!agent) break;
+        if (isTerminalSubagentStatus(agent.status)) break;
+        const summary = attributedToolSummary(activity, payload);
+        if (summary) {
+          agent.progress = null;
+          agent.lastToolName = summary;
+          agent.recentActivity = appendActivity(agent.recentActivity, at, `▸ ${summary}`);
         }
         agent.updatedAt = at;
         break;
@@ -878,7 +1016,9 @@ export function workflowCardMembers(
   };
 }
 
-/** Kinds the timeline should not render as generic rows (fold input only). */
+/** Kinds the timeline should not render as generic rows (fold input only).
+ * Attributed tool lifecycle rows require payload inspection, so callers use
+ * isAgentAttributedToolActivity for those instead of classifying by kind. */
 export function isSubagentActivityKind(kind: string): boolean {
   return (
     kind === "task.started" ||

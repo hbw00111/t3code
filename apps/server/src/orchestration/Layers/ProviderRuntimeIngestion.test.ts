@@ -2742,6 +2742,54 @@ describe("ProviderRuntimeIngestion", () => {
     expect(activityPayload?.message).toBe("runtime activity exploded");
   });
 
+  it("projects runtime goal updates and clears into thread detail", async () => {
+    const harness = await createHarness();
+    harness.emit({
+      type: "thread.goal.updated",
+      eventId: asEventId("evt-goal-updated"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      threadId: asThreadId("thread-1"),
+      payload: {
+        goal: {
+          objective: "Ship goal projections",
+          status: "active",
+          tokensUsed: 42,
+          timeUsedSeconds: 9,
+          tokenBudget: 1_000,
+        },
+      },
+    });
+
+    const updated = await waitForThread(
+      harness.readModel,
+      (entry) => entry.goal?.objective === "Ship goal projections",
+    );
+    expect(updated.goal?.tokensUsed).toBe(42);
+    expect(
+      updated.activities.find((activity) => activity.id === "evt-goal-updated")?.payload,
+    ).toEqual({
+      goal: updated.goal,
+      timelineBypass: true,
+    });
+
+    harness.emit({
+      type: "thread.goal.cleared",
+      eventId: asEventId("evt-goal-cleared"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:02.000Z",
+      threadId: asThreadId("thread-1"),
+      payload: {},
+    });
+    const cleared = await waitForThread(
+      harness.readModel,
+      (entry) =>
+        entry.goal === null &&
+        entry.activities.some((activity) => activity.id === "evt-goal-cleared"),
+    );
+    expect(cleared.goal).toBeNull();
+  });
+
   it("keeps the session running when a runtime.warning arrives during an active turn", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

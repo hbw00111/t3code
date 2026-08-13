@@ -3,6 +3,10 @@ import {
   type ChatAttachment,
   type OrchestrationEvent,
   type OrchestrationSessionStatus,
+  THREAD_GOAL_READ_ACTIVITY_KIND,
+  THREAD_GOAL_SYNCED_ACTIVITY_KIND,
+  THREAD_GOAL_UPDATED_ACTIVITY_KIND,
+  ThreadGoalSnapshot,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -10,6 +14,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -117,6 +122,44 @@ function extractActivityRequestId(payload: unknown): ApprovalRequestId | null {
   }
   const requestId = (payload as Record<string, unknown>).requestId;
   return typeof requestId === "string" ? ApprovalRequestId.make(requestId) : null;
+}
+
+const decodeThreadGoalSnapshot = Schema.decodeUnknownOption(ThreadGoalSnapshot);
+
+function goalFromActivity(
+  activity: { readonly kind: string; readonly payload: unknown; readonly createdAt: string },
+  goalSyncedAt: string | null,
+) {
+  if (
+    activity.kind !== THREAD_GOAL_UPDATED_ACTIVITY_KIND &&
+    activity.kind !== THREAD_GOAL_READ_ACTIVITY_KIND &&
+    activity.kind !== THREAD_GOAL_SYNCED_ACTIVITY_KIND
+  ) {
+    return undefined;
+  }
+  if (typeof activity.payload !== "object" || activity.payload === null) {
+    return undefined;
+  }
+  const requestStartedAt = (activity.payload as Record<string, unknown>).requestStartedAt;
+  if (
+    activity.kind === THREAD_GOAL_SYNCED_ACTIVITY_KIND &&
+    goalSyncedAt !== null &&
+    activity.createdAt < goalSyncedAt
+  ) {
+    return undefined;
+  }
+  if (
+    typeof requestStartedAt === "string" &&
+    goalSyncedAt !== null &&
+    goalSyncedAt.localeCompare(requestStartedAt) >= 0
+  ) {
+    return undefined;
+  }
+  const payloadGoal = (activity.payload as Record<string, unknown>).goal;
+  if (payloadGoal === null) {
+    return null;
+  }
+  return Option.getOrUndefined(decodeThreadGoalSnapshot(payloadGoal));
 }
 
 function isStalePendingApprovalFailureDetail(detail: string | null): boolean {
@@ -554,6 +597,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
 
     const refreshThreadShellSummary = Effect.fn("refreshThreadShellSummary")(function* (
       threadId: ThreadId,
+      existingActivities?: ReadonlyArray<ProjectionThreadActivity>,
     ) {
       const existingRow = yield* projectionThreadRepository.getById({
         threadId,
@@ -565,7 +609,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       const [messages, proposedPlans, activities, pendingApprovals] = yield* Effect.all([
         projectionThreadMessageRepository.listByThreadId({ threadId }),
         projectionThreadProposedPlanRepository.listByThreadId({ threadId }),
-        projectionThreadActivityRepository.listByThreadId({ threadId }),
+        existingActivities === undefined
+          ? projectionThreadActivityRepository.listByThreadId({ threadId })
+          : Effect.succeed(existingActivities),
         projectionPendingApprovalRepository.listByThreadId({ threadId }),
       ]);
 
@@ -623,6 +669,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             pinOrderKey: null,
             titleRegenerationRequestId: null,
             titleRegenerationStartedAt: null,
+            goal: null,
+            goalSyncedAt: null,
             latestUserMessageAt: null,
             pendingApprovalCount: 0,
             pendingUserInputCount: 0,
@@ -850,9 +898,36 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.activity-appended": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          const activities = yield* projectionThreadActivityRepository.listByThreadId({
+            threadId: event.payload.threadId,
+          });
+          const goal = goalFromActivity(event.payload.activity, existingRow.value.goalSyncedAt);
+          const goalSyncedAt =
+            event.payload.activity.kind === THREAD_GOAL_SYNCED_ACTIVITY_KIND && goal !== undefined
+              ? existingRow.value.goalSyncedAt === null ||
+                event.payload.activity.createdAt > existingRow.value.goalSyncedAt
+                ? event.payload.activity.createdAt
+                : existingRow.value.goalSyncedAt
+              : existingRow.value.goalSyncedAt;
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            ...(goal !== undefined ? { goal } : {}),
+            goalSyncedAt,
+            updatedAt: event.occurredAt,
+          });
+          yield* refreshThreadShellSummary(event.payload.threadId, activities);
+          return;
+        }
+
         case "thread.message-sent":
         case "thread.proposed-plan-upserted":
-        case "thread.activity-appended":
         case "thread.approval-response-requested":
         case "thread.user-input-response-requested": {
           const existingRow = yield* projectionThreadRepository.getById({

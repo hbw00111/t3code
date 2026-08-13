@@ -37,6 +37,7 @@ const baseThread: OrchestrationThread = {
   archivedAt: null,
   settledOverride: null,
   settledAt: null,
+  goal: null,
   deletedAt: null,
   messages: [],
   proposedPlans: [],
@@ -637,6 +638,265 @@ describe("applyThreadDetailEvent", () => {
       if (result.kind === "updated") {
         expect(result.thread.activities).toHaveLength(1);
         expect(result.thread.activities[0]?.kind).toBe("file-edit");
+      }
+    });
+
+    it("updates and clears the live goal projection from goal activities", () => {
+      const goal = {
+        objective: "Ship the persistent status strip",
+        status: "active" as const,
+        tokensUsed: 1_240,
+        timeUsedSeconds: 18,
+        tokenBudget: 10_000,
+      };
+      const appendGoal = (
+        thread: OrchestrationThread,
+        kind: "provider.thread.goal.updated" | "provider.thread.goal.synced",
+        value: typeof goal | null,
+        sequence: number,
+      ) =>
+        applyThreadDetailEvent(thread, {
+          ...baseEventFields,
+          sequence,
+          occurredAt: `2026-04-01T11:00:${String(sequence).padStart(2, "0")}.000Z`,
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-1"),
+          type: "thread.activity-appended",
+          payload: {
+            threadId: ThreadId.make("thread-1"),
+            activity: {
+              id: EventId.make(`activity-goal-${sequence}`),
+              tone: "info",
+              kind,
+              summary: "Thread goal synchronized",
+              payload: { goal: value },
+              turnId: null,
+              createdAt: `2026-04-01T11:00:${String(sequence).padStart(2, "0")}.000Z`,
+            },
+          },
+        });
+
+      const updated = appendGoal(baseThread, "provider.thread.goal.updated", goal, 1);
+      expect(updated.kind).toBe("updated");
+      if (updated.kind !== "updated") return;
+      expect(updated.thread.goal).toEqual(goal);
+
+      const cleared = appendGoal(updated.thread, "provider.thread.goal.synced", null, 2);
+      expect(cleared.kind).toBe("updated");
+      if (cleared.kind === "updated") {
+        expect(cleared.thread.goal).toBeNull();
+      }
+    });
+
+    it("ignores malformed goal payloads without erasing the current goal", () => {
+      const existingGoal = {
+        objective: "Keep the current goal",
+        status: "paused" as const,
+        tokensUsed: 12,
+        timeUsedSeconds: 3,
+      };
+      const result = applyThreadDetailEvent(
+        { ...baseThread, goal: existingGoal },
+        {
+          ...baseEventFields,
+          sequence: 22,
+          occurredAt: "2026-04-01T11:04:00.000Z",
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-1"),
+          type: "thread.activity-appended",
+          payload: {
+            threadId: ThreadId.make("thread-1"),
+            activity: {
+              id: EventId.make("activity-goal-malformed"),
+              tone: "info",
+              kind: "provider.thread.goal.synced",
+              summary: "Thread goal synchronized",
+              payload: { goal: { objective: "", status: "unknown" } },
+              turnId: null,
+              createdAt: "2026-04-01T11:04:00.000Z",
+            },
+          },
+        },
+      );
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.goal).toEqual(existingGoal);
+        expect(result.thread.goalSyncedAt).toBeUndefined();
+      }
+    });
+
+    it("keeps a synced goal when an older provider command receipt arrives later", () => {
+      const requestStartedAt = "2026-04-01T11:05:00.000Z";
+      const syncedAt = "2026-04-01T11:05:01.000Z";
+      const receiptAt = "2026-04-01T11:05:02.000Z";
+      const syncedGoal = {
+        objective: "Keep the synchronized goal",
+        status: "active" as const,
+        tokensUsed: 20,
+        timeUsedSeconds: 5,
+      };
+      const synced = applyThreadDetailEvent(baseThread, {
+        ...baseEventFields,
+        sequence: 23,
+        occurredAt: syncedAt,
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.activity-appended",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          activity: {
+            id: EventId.make("activity-goal-race-sync"),
+            tone: "info",
+            kind: "provider.thread.goal.synced",
+            summary: "Thread goal synchronized",
+            payload: { goal: syncedGoal, timelineBypass: true },
+            turnId: null,
+            createdAt: syncedAt,
+          },
+        },
+      });
+      expect(synced.kind).toBe("updated");
+      if (synced.kind !== "updated") return;
+
+      const receipt = applyThreadDetailEvent(synced.thread, {
+        ...baseEventFields,
+        sequence: 24,
+        occurredAt: receiptAt,
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.activity-appended",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          activity: {
+            id: EventId.make("activity-goal-race-receipt"),
+            tone: "info",
+            kind: "provider.thread.goal.read",
+            summary: "Thread goal status",
+            payload: {
+              commandId: CommandId.make("command-goal-race-read"),
+              operation: "get",
+              requestStartedAt,
+              goal: {
+                objective: "Stale provider command goal",
+                status: "paused",
+                tokensUsed: 1,
+                timeUsedSeconds: 1,
+              },
+            },
+            turnId: null,
+            createdAt: receiptAt,
+          },
+        },
+      });
+
+      expect(receipt.kind).toBe("updated");
+      if (receipt.kind === "updated") {
+        expect(receipt.thread.goal).toEqual(syncedGoal);
+        expect(receipt.thread.goalSyncedAt).toBe(syncedAt);
+        expect(receipt.thread.activities.map((activity) => activity.id)).toContain(
+          "activity-goal-race-receipt",
+        );
+      }
+    });
+
+    it("uses the persisted sync watermark when the sync activity is not loaded", () => {
+      const requestStartedAt = "2026-04-01T11:06:00.000Z";
+      const syncedAt = "2026-04-01T11:06:01.000Z";
+      const existingGoal = {
+        objective: "Keep the windowed goal",
+        status: "active" as const,
+        tokensUsed: 20,
+        timeUsedSeconds: 5,
+      };
+      const result = applyThreadDetailEvent(
+        { ...baseThread, goal: existingGoal, goalSyncedAt: syncedAt, activities: [] },
+        {
+          ...baseEventFields,
+          sequence: 25,
+          occurredAt: "2026-04-01T11:06:02.000Z",
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-1"),
+          type: "thread.activity-appended",
+          payload: {
+            threadId: ThreadId.make("thread-1"),
+            activity: {
+              id: EventId.make("activity-goal-windowed-receipt"),
+              tone: "info",
+              kind: "provider.thread.goal.read",
+              summary: "Thread goal status",
+              payload: {
+                commandId: CommandId.make("command-goal-windowed-read"),
+                operation: "get",
+                requestStartedAt,
+                goal: {
+                  objective: "Stale provider command goal",
+                  status: "paused",
+                  tokensUsed: 1,
+                  timeUsedSeconds: 1,
+                },
+              },
+              turnId: null,
+              createdAt: "2026-04-01T11:06:02.000Z",
+            },
+          },
+        },
+      );
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.goal).toEqual(existingGoal);
+        expect(result.thread.activities).toHaveLength(1);
+      }
+    });
+
+    it("does not regress the goal when an older provider sync arrives late", () => {
+      const existingGoal = {
+        objective: "Keep the newest provider goal",
+        status: "active" as const,
+        tokensUsed: 20,
+        timeUsedSeconds: 5,
+      };
+      const result = applyThreadDetailEvent(
+        {
+          ...baseThread,
+          goal: existingGoal,
+          goalSyncedAt: "2026-04-01T11:07:02.000Z",
+        },
+        {
+          ...baseEventFields,
+          sequence: 26,
+          occurredAt: "2026-04-01T11:07:03.000Z",
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-1"),
+          type: "thread.activity-appended",
+          payload: {
+            threadId: ThreadId.make("thread-1"),
+            activity: {
+              id: EventId.make("activity-goal-older-sync"),
+              tone: "info",
+              kind: "provider.thread.goal.synced",
+              summary: "Thread goal synchronized",
+              payload: {
+                goal: {
+                  objective: "Older provider goal",
+                  status: "paused",
+                  tokensUsed: 1,
+                  timeUsedSeconds: 1,
+                },
+                timelineBypass: true,
+              },
+              turnId: null,
+              createdAt: "2026-04-01T11:07:01.000Z",
+            },
+          },
+        },
+      );
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.goal).toEqual(existingGoal);
+        expect(result.thread.goalSyncedAt).toBe("2026-04-01T11:07:02.000Z");
       }
     });
 
