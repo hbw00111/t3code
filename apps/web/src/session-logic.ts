@@ -600,7 +600,7 @@ export function deriveActivePlanState(
 }
 
 export interface TurnPlanEntry {
-  /** Stable per-turn row id (plans rewrite constantly; the row must not churn). */
+  /** Stable row id (plans rewrite and can continue across turns). */
   id: string;
   /** Anchor timestamp: the turn's FIRST plan activity, so the chip renders where planning began. */
   createdAt: string;
@@ -609,15 +609,16 @@ export interface TurnPlanEntry {
 }
 
 /**
- * One inline plan chip per turn that produced plan/todo steps: the latest
- * snapshot for the turn, anchored at the first snapshot's timestamp. Turn-less
- * plan activities collapse into a single chip keyed by thread order.
+ * One inline plan chip per logical checklist, anchored at its first snapshot.
+ * Providers can continue the same checklist in a later turn, so an exact step
+ * signature updates the original chip instead of leaving the old count frozen.
  */
 export function deriveTurnPlans(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): TurnPlanEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   const byTurn = new Map<string, TurnPlanEntry>();
+  const signatureToKey = new Map<string, string>();
   for (const activity of ordered) {
     if (activity.kind !== "turn.plan.updated") {
       continue;
@@ -632,14 +633,27 @@ export function deriveTurnPlans(
     }
     const existing = byTurn.get(key);
     if (existing) {
+      const previousSignature = existing.plan.steps.map((step) => step.step).join("\u0000");
+      if (signatureToKey.get(previousSignature) === key) {
+        signatureToKey.delete(previousSignature);
+      }
       existing.plan = plan;
+      signatureToKey.set(plan.steps.map((step) => step.step).join("\u0000"), key);
     } else {
-      byTurn.set(key, {
-        id: `turn-plan:${key}`,
-        createdAt: activity.createdAt,
-        turnId: activity.turnId,
-        plan,
-      });
+      const signature = plan.steps.map((step) => step.step).join("\u0000");
+      const continuedKey = signatureToKey.get(signature);
+      const continued = continuedKey ? byTurn.get(continuedKey) : undefined;
+      if (continued) {
+        continued.plan = plan;
+      } else {
+        byTurn.set(key, {
+          id: `turn-plan:${key}`,
+          createdAt: activity.createdAt,
+          turnId: activity.turnId,
+          plan,
+        });
+        signatureToKey.set(signature, key);
+      }
     }
   }
   return [...byTurn.values()];

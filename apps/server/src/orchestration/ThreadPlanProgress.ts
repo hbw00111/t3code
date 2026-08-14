@@ -19,19 +19,20 @@ export interface ThreadPlanProgress {
   readonly step: string;
   readonly completedSteps: number;
   readonly totalSteps: number;
+  readonly steps: ReadonlyArray<PlanStepInput>;
 }
 
-interface PlanStepInput {
+export interface PlanStepInput {
   readonly step: string;
-  readonly status: string;
+  readonly status: "pending" | "inProgress" | "completed";
 }
 
 export class ThreadPlanProgressService extends Context.Service<
   ThreadPlanProgressService,
   {
     /**
-     * Feed one turn.plan.updated payload. An all-completed plan clears the
-     * entry (the turn is wrapping up; nothing is "in progress" anymore).
+     * Feed one turn.plan.updated payload. The final all-completed snapshot is
+     * retained until the turn settles so clients can render the real total.
      */
     readonly recordPlanProgress: (threadId: string, plan: ReadonlyArray<PlanStepInput>) => void;
 
@@ -53,8 +54,9 @@ export function make(): ThreadPlanProgressService["Service"] {
       // plan that was just written has no in-progress step yet).
       const current =
         plan.find((step) => step.status === "inProgress") ??
-        plan.find((step) => step.status !== "completed");
-      if (totalSteps === 0 || completedSteps === totalSteps || current === undefined) {
+        plan.find((step) => step.status !== "completed") ??
+        plan.at(-1);
+      if (totalSteps === 0 || current === undefined) {
         progressByThreadId.delete(threadId);
         return;
       }
@@ -62,6 +64,7 @@ export function make(): ThreadPlanProgressService["Service"] {
         step: current.step,
         completedSteps,
         totalSteps,
+        steps: plan.map((step) => ({ ...step })),
       });
     },
 

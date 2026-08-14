@@ -2364,13 +2364,22 @@ function ChatViewContent(props: ChatViewProps) {
   });
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
   const composerPlanStatus = useMemo<ComposerPlanStatus | null>(() => {
-    if (!isWorking || !workingStepLabel || !activePlan) return null;
+    if (!isWorking || !activePlan) return null;
+    const belongsToActiveTurn = activePlan.turnId === (activeLatestTurn?.turnId ?? null);
+    const continuesActiveGoal = activeThread?.goal?.status === "active";
+    if (!belongsToActiveTurn && !continuesActiveGoal) return null;
+    const currentStep =
+      activePlan.steps.find((step) => step.status === "inProgress")?.step ??
+      activePlan.steps.find((step) => step.status === "pending")?.step ??
+      activePlan.steps.at(-1)?.step;
+    if (!currentStep) return null;
     return {
-      currentStep: workingStepLabel,
+      currentStep,
       completedSteps: activePlan.steps.filter((step) => step.status === "completed").length,
       totalSteps: activePlan.steps.length,
+      steps: activePlan.steps,
     };
-  }, [activePlan, isWorking, workingStepLabel]);
+  }, [activeLatestTurn?.turnId, activePlan, activeThread?.goal?.status, isWorking]);
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,

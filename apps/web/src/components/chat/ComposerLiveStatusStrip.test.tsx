@@ -94,6 +94,12 @@ describe("ComposerLiveStatusStrip", () => {
         currentStep: "Verify the composer integration",
         completedSteps: 2,
         totalSteps: 4,
+        steps: [
+          { step: "Inspect the current UI", status: "completed" },
+          { step: "Wire live events", status: "completed" },
+          { step: "Verify the composer integration", status: "inProgress" },
+          { step: "Ship the change", status: "pending" },
+        ],
       },
     });
     expect(row).not.toBeNull();
@@ -109,7 +115,7 @@ describe("ComposerLiveStatusStrip", () => {
     );
     const progress = visitElements(
       row,
-      (element) => (element.props.style as { width?: string } | undefined)?.width === "50%",
+      (element) => element.props["data-composer-plan-segment-status"] === "completed",
     );
     const completion = visitElements(
       row,
@@ -134,6 +140,64 @@ describe("ComposerLiveStatusStrip", () => {
     expect(elementWithText(row, "Ship reliable live status")).not.toBeNull();
     expect(elementWithText(row, "chat.liveGoalActive")).not.toBeNull();
     expect(usage).not.toBeNull();
+  });
+
+  it("expands the live checklist and refreshes its completed steps", () => {
+    const initialPlan = {
+      currentStep: "Inspect the runtime",
+      completedSteps: 0,
+      totalSteps: 3,
+      steps: [
+        { step: "Inspect the runtime", status: "inProgress" },
+        { step: "Implement the fix", status: "pending" },
+        { step: "Verify the result", status: "pending" },
+      ],
+    } as never;
+    const collapsed = renderStrip({ plan: initialPlan, goal: null });
+    expect(collapsed).not.toBeNull();
+    if (!collapsed) return;
+
+    const disclosure = visitElements(
+      collapsed,
+      (element) =>
+        element.type === "button" && element.props["data-composer-plan-disclosure"] === "true",
+    );
+    expect(disclosure?.props["aria-expanded"]).toBe(false);
+    expect(elementWithText(collapsed, "Implement the fix")).toBeNull();
+    (disclosure?.props.onClick as (() => void) | undefined)?.();
+
+    const completedPlan = {
+      currentStep: "Verify the result",
+      completedSteps: 2,
+      totalSteps: 3,
+      steps: [
+        { step: "Inspect the runtime", status: "completed" },
+        { step: "Implement the fix", status: "completed" },
+        { step: "Verify the result", status: "inProgress" },
+      ],
+    } as never;
+    const expanded = renderStrip({ plan: completedPlan, goal: null });
+    expect(expanded).not.toBeNull();
+    if (!expanded) return;
+
+    const expandedDisclosure = visitElements(
+      expanded,
+      (element) =>
+        element.type === "button" && element.props["data-composer-plan-disclosure"] === "true",
+    );
+    const completedRows = visitElements(
+      expanded,
+      (element) => element.props["data-composer-plan-step-status"] === "completed",
+    );
+    const progress = visitElements(
+      expanded,
+      (element) => element.props["data-composer-plan-segment-status"] === "completed",
+    );
+
+    expect(expandedDisclosure?.props["aria-expanded"]).toBe(true);
+    expect(elementWithText(expanded, "Implement the fix")).not.toBeNull();
+    expect(completedRows).not.toBeNull();
+    expect(progress).not.toBeNull();
   });
 
   it("saves an edited objective with Enter", () => {

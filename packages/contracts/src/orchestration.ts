@@ -501,6 +501,14 @@ export const OrchestrationThreadShell = Schema.Struct({
         step: TrimmedNonEmptyString,
         completedSteps: NonNegativeInt,
         totalSteps: NonNegativeInt,
+        steps: Schema.optional(
+          Schema.Array(
+            Schema.Struct({
+              step: TrimmedNonEmptyString,
+              status: Schema.Literals(["pending", "inProgress", "completed"]),
+            }),
+          ),
+        ),
       }),
     ),
   ),

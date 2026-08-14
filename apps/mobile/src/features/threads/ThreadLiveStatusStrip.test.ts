@@ -45,7 +45,16 @@ function activity(input: {
 
 describe("mobile thread live status", () => {
   it("estimates the initial composer inset for every visible row", () => {
-    const plan = { currentStep: "Test mobile", completedSteps: 1, totalSteps: 3 };
+    const plan = {
+      currentStep: "Test mobile",
+      completedSteps: 1,
+      totalSteps: 3,
+      steps: [
+        { step: "Inspect mobile", status: "completed" as const },
+        { step: "Test mobile", status: "inProgress" as const },
+        { step: "Ship mobile", status: "pending" as const },
+      ],
+    };
     expect(estimateThreadLiveStatusHeight({ plan: null, hasGoal: false })).toBe(0);
     expect(estimateThreadLiveStatusHeight({ plan, hasGoal: false })).toBe(50);
     expect(estimateThreadLiveStatusHeight({ plan: null, hasGoal: true })).toBe(66);

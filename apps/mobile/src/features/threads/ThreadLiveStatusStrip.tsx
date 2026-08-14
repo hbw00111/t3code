@@ -8,7 +8,7 @@ import {
   IconTrash,
   IconX,
 } from "@tabler/icons-react-native";
-import { useEffect, useReducer, useRef, type ReactNode } from "react";
+import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Alert, Pressable, View, type TextInput } from "react-native";
 
 import { AppText as Text, AppTextInput } from "../../components/AppText";
@@ -67,6 +67,7 @@ function GoalIconButton(props: {
 export function ThreadLiveStatusStrip(props: ThreadLiveStatusStripProps) {
   const iconColor = useThemeColor("--color-icon-muted");
   const inputRef = useRef<TextInput>(null);
+  const [planExpanded, setPlanExpanded] = useState(false);
   const goalObjectiveRef = useRef(props.goal?.objective ?? null);
   goalObjectiveRef.current = props.goal?.objective ?? null;
   const [editor, dispatchEditor] = useReducer(reduceGoalObjectiveEditor, {
@@ -87,11 +88,13 @@ export function ThreadLiveStatusStrip(props: ThreadLiveStatusStripProps) {
 
   if (!props.plan && !props.goal) return null;
 
+  const planSteps = props.plan?.steps ?? [];
+  const totalSteps = planSteps.length > 0 ? planSteps.length : (props.plan?.totalSteps ?? 0);
   const completedSteps = props.plan
-    ? Math.max(0, Math.min(props.plan.completedSteps, props.plan.totalSteps))
+    ? planSteps.length > 0
+      ? planSteps.filter((step) => step.status === "completed").length
+      : Math.max(0, Math.min(props.plan.completedSteps, props.plan.totalSteps))
     : 0;
-  const progress =
-    props.plan && props.plan.totalSteps > 0 ? completedSteps / props.plan.totalSteps : 0;
   const canResume =
     props.goal?.status === "paused" ||
     props.goal?.status === "blocked" ||
@@ -136,23 +139,75 @@ export function ThreadLiveStatusStrip(props: ThreadLiveStatusStripProps) {
       className="mx-4 mb-2 overflow-hidden rounded-lg border border-border bg-card"
     >
       {props.plan ? (
-        <View
-          className={`min-h-10 flex-row items-center gap-2 px-3 ${props.goal ? "border-b border-border-subtle" : ""}`}
-        >
-          <SymbolView name="checkmark.circle" size={14} tintColor={iconColor} type="monochrome" />
-          <Text className="text-2xs text-foreground-muted">Current</Text>
-          <Text className="min-w-0 flex-1 font-t3-bold text-xs" numberOfLines={1}>
-            {props.plan.currentStep}
-          </Text>
-          <View className="h-1 w-9 overflow-hidden rounded-full bg-subtle-strong">
-            <View
-              className="h-1 rounded-full bg-foreground-muted"
-              style={{ width: `${progress * 100}%` }}
+        <View className={props.goal ? "border-b border-border-subtle" : undefined}>
+          <Pressable
+            accessibilityLabel="Plan steps"
+            accessibilityRole="button"
+            accessibilityState={{ expanded: planExpanded }}
+            className="min-h-10 flex-row items-center gap-2 px-3 active:bg-subtle disabled:opacity-100"
+            disabled={planSteps.length === 0}
+            onPress={() => setPlanExpanded((expanded) => !expanded)}
+          >
+            <SymbolView
+              name={planExpanded ? "chevron.down" : "chevron.right"}
+              size={13}
+              tintColor={iconColor}
+              type="monochrome"
             />
-          </View>
-          <Text className="font-mono text-2xs text-foreground-muted">
-            {completedSteps}/{props.plan.totalSteps}
-          </Text>
+            <View className="h-1 w-10 flex-row gap-0.5">
+              {planSteps.map((step) => (
+                <View
+                  key={step.step}
+                  className={`h-1 min-w-0 flex-1 rounded-full ${
+                    step.status === "completed"
+                      ? "bg-foreground-muted"
+                      : step.status === "inProgress"
+                        ? "bg-foreground"
+                        : "bg-subtle-strong"
+                  }`}
+                />
+              ))}
+            </View>
+            <Text className="min-w-0 flex-1 font-t3-bold text-xs" numberOfLines={1}>
+              {props.plan.currentStep}
+            </Text>
+            <Text className="font-mono text-2xs text-foreground-muted">
+              {completedSteps}/{totalSteps}
+            </Text>
+          </Pressable>
+          {planExpanded ? (
+            <View className="gap-1 px-3 pb-2 pl-8">
+              {planSteps.map((step) => (
+                <View key={step.step} className="min-h-5 flex-row items-start gap-2">
+                  <View className="h-5 w-3 items-center justify-center">
+                    {step.status === "completed" ? (
+                      <SymbolView
+                        name="checkmark"
+                        size={11}
+                        tintColor={iconColor}
+                        type="monochrome"
+                      />
+                    ) : (
+                      <View
+                        className={`h-2 w-2 rounded-full ${
+                          step.status === "inProgress" ? "bg-foreground" : "border border-border"
+                        }`}
+                      />
+                    )}
+                  </View>
+                  <Text
+                    className={
+                      step.status === "completed"
+                        ? "min-w-0 flex-1 text-xs text-foreground-muted"
+                        : "min-w-0 flex-1 text-xs text-foreground"
+                    }
+                  >
+                    {step.step}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
         </View>
       ) : null}
 

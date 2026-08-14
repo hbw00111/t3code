@@ -459,6 +459,46 @@ describe("deriveTurnPlans", () => {
     expect(turnPlans[1]?.plan.steps).toEqual([{ step: "Ship it", status: "pending" }]);
   });
 
+  it("updates the original chip when the same checklist continues in a later turn", () => {
+    const initialPlan = [
+      { step: "Inspect the runtime", status: "inProgress" as const },
+      { step: "Ship the fix", status: "pending" as const },
+    ];
+    const completedPlan = initialPlan.map((step) => ({
+      ...step,
+      status: "completed" as const,
+    }));
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "plan-started",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "turn.plan.updated",
+        summary: "Plan updated",
+        tone: "info",
+        turnId: "turn-1",
+        payload: { plan: initialPlan },
+      }),
+      makeActivity({
+        id: "plan-completed-after-continuation",
+        createdAt: "2026-02-23T00:05:00.000Z",
+        kind: "turn.plan.updated",
+        summary: "Plan updated",
+        tone: "info",
+        turnId: "turn-2",
+        payload: { plan: completedPlan },
+      }),
+    ];
+
+    const turnPlans = deriveTurnPlans(activities);
+    expect(turnPlans).toHaveLength(1);
+    expect(turnPlans[0]).toMatchObject({
+      id: "turn-plan:turn-1",
+      createdAt: "2026-02-23T00:00:01.000Z",
+      turnId: "turn-1",
+    });
+    expect(turnPlans[0]?.plan.steps).toEqual(completedPlan);
+  });
+
   it("skips activities without parseable steps", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

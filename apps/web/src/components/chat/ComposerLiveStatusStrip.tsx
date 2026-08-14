@@ -2,7 +2,8 @@ import type { ThreadGoalSnapshot, ThreadGoalStatus } from "@t3tools/contracts";
 import { formatTokens } from "@t3tools/shared/usageFormat";
 import {
   CheckIcon,
-  ListChecksIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   PauseIcon,
   PencilIcon,
   PlayIcon,
@@ -32,6 +33,10 @@ export interface ComposerPlanStatus {
   readonly currentStep: string;
   readonly completedSteps: number;
   readonly totalSteps: number;
+  readonly steps: ReadonlyArray<{
+    readonly step: string;
+    readonly status: "pending" | "inProgress" | "completed";
+  }>;
 }
 
 export interface ComposerLiveStatusStripProps {
@@ -123,6 +128,7 @@ export function ComposerLiveStatusStrip({
 }: ComposerLiveStatusStripProps) {
   const { t } = useTranslation();
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+  const [planExpanded, setPlanExpanded] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const editing = editorSession !== null;
   const draftObjective = editorSession?.draftObjective ?? goal?.objective ?? "";
@@ -155,8 +161,13 @@ export function ComposerLiveStatusStrip({
 
   if (!plan && !goal) return null;
 
-  const completedSteps = plan ? Math.max(0, Math.min(plan.completedSteps, plan.totalSteps)) : 0;
-  const planPercent = plan && plan.totalSteps > 0 ? (completedSteps / plan.totalSteps) * 100 : 0;
+  const planSteps = plan?.steps ?? [];
+  const totalSteps = planSteps.length > 0 ? planSteps.length : (plan?.totalSteps ?? 0);
+  const completedSteps = plan
+    ? planSteps.length > 0
+      ? planSteps.filter((step) => step.status === "completed").length
+      : Math.max(0, Math.min(plan.completedSteps, plan.totalSteps))
+    : 0;
   const saveGoal = () => {
     const objective = draftObjective.trim();
     if (!objective || objective === goal?.objective) {
@@ -205,31 +216,82 @@ export function ComposerLiveStatusStrip({
       >
         {plan ? (
           <div
-            className={cn(
-              "grid min-h-9 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 px-3 py-1.5 text-xs sm:px-4",
-              goal && "border-b border-border/55",
-            )}
+            className={cn("text-xs", goal && "border-b border-border/55")}
             data-composer-plan-status="true"
           >
-            <ListChecksIcon aria-hidden className="size-3.5 text-info-foreground" />
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="shrink-0 text-muted-foreground">{t("chat.currentStep")}</span>
+            <button
+              type="button"
+              aria-expanded={planExpanded}
+              data-composer-plan-disclosure="true"
+              disabled={planSteps.length === 0}
+              onClick={() => setPlanExpanded((expanded) => !expanded)}
+              className="grid min-h-9 w-full grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-x-2 px-3 py-1.5 text-left transition-colors hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70 disabled:cursor-default sm:px-4"
+            >
+              {planExpanded ? (
+                <ChevronDownIcon aria-hidden className="size-3.5 text-muted-foreground/70" />
+              ) : (
+                <ChevronRightIcon aria-hidden className="size-3.5 text-muted-foreground/70" />
+              )}
+              <span aria-hidden className="hidden h-1 w-14 items-center gap-0.5 sm:flex">
+                {planSteps.map((step) => (
+                  <span
+                    key={step.step}
+                    data-composer-plan-segment-status={step.status}
+                    className={cn(
+                      "h-1 min-w-0 flex-1 rounded-full transition-colors duration-200",
+                      step.status === "completed"
+                        ? "bg-success"
+                        : step.status === "inProgress"
+                          ? "bg-primary"
+                          : "bg-muted-foreground/25",
+                    )}
+                  />
+                ))}
+              </span>
               <span className="min-w-0 truncate font-medium text-foreground">
                 {plan.currentStep}
               </span>
-            </div>
-            <div className="flex items-center gap-2 font-mono text-[.68rem] tabular-nums text-muted-foreground">
-              <span className="hidden w-14 overflow-hidden rounded-full bg-muted sm:block">
-                <span
-                  aria-hidden
-                  className="block h-1 rounded-full bg-info transition-[width] duration-200 motion-reduce:transition-none"
-                  style={{ width: `${planPercent}%` }}
-                />
+              <span className="font-mono text-[.68rem] tabular-nums text-muted-foreground">
+                {completedSteps}/{totalSteps}
               </span>
-              <span>
-                {completedSteps}/{plan.totalSteps}
-              </span>
-            </div>
+            </button>
+            {planExpanded ? (
+              <div className="space-y-px px-3 pb-2 pl-10 sm:px-4 sm:pl-[6.75rem]">
+                {planSteps.map((step) => (
+                  <div
+                    key={step.step}
+                    data-composer-plan-step-status={step.status}
+                    className="flex items-baseline gap-2 leading-5"
+                  >
+                    <span
+                      aria-hidden
+                      className={cn(
+                        "w-3 shrink-0 text-center font-mono text-[10px]",
+                        step.status === "completed"
+                          ? "text-success"
+                          : step.status === "inProgress"
+                            ? "text-primary"
+                            : "text-muted-foreground/40",
+                      )}
+                    >
+                      {step.status === "completed" ? "✓" : step.status === "inProgress" ? "●" : "○"}
+                    </span>
+                    <span
+                      className={cn(
+                        "min-w-0",
+                        step.status === "completed"
+                          ? "text-muted-foreground/55"
+                          : step.status === "inProgress"
+                            ? "text-foreground/90"
+                            : "text-muted-foreground/70",
+                      )}
+                    >
+                      {step.step}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
 

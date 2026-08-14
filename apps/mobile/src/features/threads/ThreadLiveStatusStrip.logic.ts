@@ -7,10 +7,16 @@ import {
 
 export type ThreadGoalAction = "get" | "set" | "pause" | "resume" | "clear";
 
+export interface ThreadLivePlanStep {
+  readonly step: string;
+  readonly status: "pending" | "inProgress" | "completed";
+}
+
 export interface ThreadLivePlanStatus {
   readonly currentStep: string;
   readonly completedSteps: number;
   readonly totalSteps: number;
+  readonly steps: ReadonlyArray<ThreadLivePlanStep>;
 }
 
 const PLAN_ROW_HEIGHT = 40;

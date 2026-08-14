@@ -216,6 +216,7 @@ function ThreadRouteContent(
           currentStep: selectedThread.planProgress.step,
           completedSteps: selectedThread.planProgress.completedSteps,
           totalSteps: selectedThread.planProgress.totalSteps,
+          steps: selectedThread.planProgress.steps ?? [],
         }
       : null;
   const gitState = useSelectedThreadGitState();
