@@ -10,8 +10,8 @@ import * as ProcessRunner from "../processRunner.ts";
 
 /**
  * A pinned runtime is an exact `t3@<version>` npm-installed into
- * <baseDir>/runtime/versions/<version>. The boot service points its systemd
- * unit here, and server self-update installs the target version here before
+ * <baseDir>/runtime/versions/<version>. The boot service points its service
+ * manager definition here, and server self-update installs the target version here before
  * switching over, never `npx t3`, whose cache is ephemeral and whose
  * registry fetch at boot would make startup depend on the network.
  */
@@ -80,6 +80,9 @@ export class PinnedRuntimePreflightBlockedError extends Schema.TaggedErrorClass<
 interface PinnedRuntimeInstallInput {
   readonly baseDir: string;
   readonly version: string;
+  readonly source?:
+    | { readonly type: "registry" }
+    | { readonly type: "bundled-directory"; readonly directory: string };
   readonly fs: FileSystem.FileSystem;
   readonly path: Path.Path;
   readonly runner: ProcessRunner.ProcessRunner["Service"];
@@ -130,7 +133,7 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
         }),
     ),
   );
-  const stagingDir = yield* fs
+  const stagingRoot = yield* fs
     .makeTempDirectory({
       directory: versionsDir,
       prefix: ".staging-",
@@ -144,6 +147,7 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
           }),
       ),
     );
+  const stagingDir = input.path.join(stagingRoot, "runtime");
   const stagingPaths: PinnedRuntimePaths = {
     versionDir: stagingDir,
     entryPath: input.path.join(stagingDir, "node_modules", "t3", "dist", "bin.mjs"),
@@ -151,27 +155,47 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
   };
 
   return yield* Effect.gen(function* () {
-    const installStep = "installing the pinned t3 runtime (this can take a few minutes)";
-    yield* runner
-      .run({
-        command: "npm",
-        args: ["install", "--prefix", stagingDir, "--no-fund", "--no-audit", `t3@${input.version}`],
-        // Native dependencies may compile from source on slower machines.
-        timeout: PINNED_RUNTIME_INSTALL_TIMEOUT,
-      })
-      .pipe(
-        Effect.mapError((cause) => new PinnedRuntimeInstallError({ step: installStep, cause })),
-        Effect.filterOrFail(
-          (result) => result.code === 0,
-          (result) =>
+    const source = input.source ?? { type: "registry" as const };
+    if (source.type === "bundled-directory") {
+      yield* fs.copy(source.directory, stagingDir).pipe(
+        Effect.mapError(
+          (cause) =>
             new PinnedRuntimeInstallError({
-              step: installStep,
-              exitCode: Number(result.code),
-              stdoutLength: result.stdout.length,
-              stderrLength: result.stderr.length,
+              step: "copying the bundled t3 runtime",
+              cause,
             }),
         ),
       );
+    } else {
+      const installStep = "installing the pinned t3 runtime (this can take a few minutes)";
+      yield* runner
+        .run({
+          command: "npm",
+          args: [
+            "install",
+            "--prefix",
+            stagingDir,
+            "--no-fund",
+            "--no-audit",
+            `t3@${input.version}`,
+          ],
+          // Native dependencies may compile from source on slower machines.
+          timeout: PINNED_RUNTIME_INSTALL_TIMEOUT,
+        })
+        .pipe(
+          Effect.mapError((cause) => new PinnedRuntimeInstallError({ step: installStep, cause })),
+          Effect.filterOrFail(
+            (result) => result.code === 0,
+            (result) =>
+              new PinnedRuntimeInstallError({
+                step: installStep,
+                exitCode: Number(result.code),
+                stdoutLength: result.stdout.length,
+                stderrLength: result.stderr.length,
+              }),
+          ),
+        );
+    }
 
     yield* input.validate(stagingPaths);
     yield* fs
@@ -214,7 +238,7 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
     if (!published) yield* input.validate(paths);
     return paths;
   }).pipe(
-    Effect.ensuring(fs.remove(stagingDir, { recursive: true, force: true }).pipe(Effect.ignore)),
+    Effect.ensuring(fs.remove(stagingRoot, { recursive: true, force: true }).pipe(Effect.ignore)),
   );
 });
 

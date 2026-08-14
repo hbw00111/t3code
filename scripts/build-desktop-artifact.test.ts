@@ -2,8 +2,10 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -28,7 +30,9 @@ import {
   resolveClerkPasskeyNativeArtifacts,
   resolveMacPasskeySigningConfiguration,
   resolveDesktopRuntimeDependencies,
+  resolveFfiNativeDependencies,
   resolveFffNativeDependencies,
+  resolveNodePtyPrebuildDirectories,
   resolveBuildOptions,
   resolveDesktopBuildIconAssets,
   resolveDesktopProductName,
@@ -41,6 +45,7 @@ import {
   resolveMockUpdateServerUrl,
   resolvePackageManagerUserAgent,
   stageLinuxIconSize,
+  stageDesktopServiceBundle,
   STAGE_INSTALL_ARGS,
   WINDOWS_ASAR_UNPACK,
 } from "./build-desktop-artifact.ts";
@@ -558,6 +563,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         from: "apps/desktop/prod-resources/resource-monitor",
         to: "resource-monitor",
       },
+      {
+        from: "apps/desktop/prod-resources/t3-runtime",
+        to: "t3-runtime",
+      },
     ]);
     assert.deepStrictEqual(resolveResourceMonitorRustTargets("mac", "universal"), [
       "aarch64-apple-darwin",
@@ -591,7 +600,57 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "@ff-labs/fff-bin-linux-arm64-gnu": "0.9.4",
       "@ff-labs/fff-bin-linux-arm64-musl": "0.9.4",
     });
+    assert.deepStrictEqual(resolveFfiNativeDependencies("mac", "universal", "1.3.2"), {
+      "@yuuang/ffi-rs-darwin-arm64": "1.3.2",
+      "@yuuang/ffi-rs-darwin-x64": "1.3.2",
+    });
+    assert.deepStrictEqual(resolveFfiNativeDependencies("win", "x64", "1.3.2"), {
+      "@yuuang/ffi-rs-win32-x64-msvc": "1.3.2",
+    });
+    assert.deepStrictEqual(resolveFfiNativeDependencies("linux", "arm64", "1.3.2"), {
+      "@yuuang/ffi-rs-linux-arm64-gnu": "1.3.2",
+    });
+    assert.deepStrictEqual(resolveNodePtyPrebuildDirectories("mac", "arm64"), ["darwin-arm64"]);
+    assert.deepStrictEqual(resolveNodePtyPrebuildDirectories("mac", "universal"), [
+      "darwin-arm64",
+      "darwin-x64",
+    ]);
   });
+
+  it.effect("stages every file emitted by the dedicated server bundle", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const rootDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "desktop-service-bundle-",
+      });
+      const sourceDir = path.join(rootDir, "dist-service");
+      const destinationDir = path.join(rootDir, "runtime", "node_modules", "t3", "dist");
+      yield* fs.makeDirectory(sourceDir, { recursive: true });
+      yield* Effect.all([
+        fs.writeFileString(path.join(sourceDir, "bin.mjs"), "./chunk.mjs\n"),
+        fs.writeFileString(path.join(sourceDir, "chunk.mjs"), "export const value = 1;\n"),
+        fs.writeFileString(path.join(sourceDir, "service-launcher.mjs"), "export {};\n"),
+        fs.writeFileString(path.join(sourceDir, "service-launcher.mjs.map"), "{}\n"),
+      ]);
+
+      yield* stageDesktopServiceBundle({ sourceDir, destinationDir });
+
+      assert.equal(yield* fs.readFileString(path.join(destinationDir, "bin.mjs")), "./chunk.mjs\n");
+      assert.equal(
+        yield* fs.readFileString(path.join(destinationDir, "chunk.mjs")),
+        "export const value = 1;\n",
+      );
+      assert.equal(
+        yield* fs.readFileString(path.join(destinationDir, "service-launcher.mjs")),
+        "export {};\n",
+      );
+      assert.equal(
+        yield* fs.readFileString(path.join(destinationDir, "service-launcher.mjs.map")),
+        "{}\n",
+      );
+    }),
+  );
 
   it("resolves target Clerk passkey native artifacts", () => {
     assert.deepStrictEqual(resolveClerkPasskeyNativeArtifacts("mac", "universal"), [

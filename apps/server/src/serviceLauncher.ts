@@ -7,6 +7,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import type {
@@ -22,15 +23,19 @@ import {
   decodeServiceLauncherChildMessage,
   isExactServiceVersion,
   parseServiceState,
+  SERVICE_BOOTSTRAP_FD,
   SERVICE_LAUNCHER_CONTEXT_ENV,
   SERVICE_LAUNCHER_PROTOCOL,
+  SERVICE_KEEP_AWAKE_ENV,
   SERVICE_STATE_FILE,
   SERVICE_STOP_MARKER_FILE,
 } from "./cloud/serviceProtocol.ts";
+import type { ServiceBackendBootstrap } from "@t3tools/contracts";
 
 const HANDOFF_DELAY_MS = 2_000;
 const PREPARED_TIMEOUT_MS = 120_000;
 const TERMINATE_GRACE_MS = 5_000;
+const MACOS_CAFFEINATE_PATH = "/usr/bin/caffeinate";
 
 type TerminalStatus = "committed" | "rolled-back" | "failed";
 type ChildRole = "active" | "trial";
@@ -281,6 +286,7 @@ export class Launcher {
   }
 
   async run(): Promise<void> {
+    const wakeAssertion = this.#startWakeAssertion();
     const onSigterm = () => void this.stop("SIGTERM");
     const onSigint = () => void this.stop("SIGINT");
     process.once("SIGTERM", onSigterm);
@@ -291,7 +297,24 @@ export class Launcher {
     } finally {
       process.off("SIGTERM", onSigterm);
       process.off("SIGINT", onSigint);
+      if (wakeAssertion?.pid !== undefined) wakeAssertion.kill("SIGTERM");
     }
+  }
+
+  #startWakeAssertion(): NodeChildProcess.ChildProcess | undefined {
+    // oxlint-disable-next-line t3code/no-global-process-runtime -- The standalone launcher has no Effect runtime.
+    if (NodeOS.platform() !== "darwin" || process.env[SERVICE_KEEP_AWAKE_ENV] !== "1") {
+      return undefined;
+    }
+    const assertion = NodeChildProcess.spawn(
+      MACOS_CAFFEINATE_PATH,
+      ["-i", "-s", "-w", String(process.pid)],
+      { stdio: "ignore" },
+    );
+    assertion.once("error", (error) => {
+      process.stderr.write(`[service-launcher] Could not keep the Mac awake: ${error.message}\n`);
+    });
+    return assertion;
   }
 
   #enqueue(transition: () => Promise<void>): void {
@@ -397,12 +420,29 @@ export class Launcher {
     const context: ServiceLauncherContext = {
       protocol: SERVICE_LAUNCHER_PROTOCOL,
       childVersion: version,
+      runtimeSource: this.#state.runtimeSource,
       ...(update === undefined ? {} : { update }),
     };
-    const child = NodeChildProcess.spawn(process.execPath, [paths.entryPath, "serve"], {
-      env: { ...process.env, [SERVICE_LAUNCHER_CONTEXT_ENV]: JSON.stringify(context) },
-      stdio: ["inherit", "inherit", "inherit", "ipc"],
-    });
+    const bootstrap: ServiceBackendBootstrap = {
+      mode: "web",
+      noBrowser: true,
+      t3Home: this.#baseDir,
+      host: "127.0.0.1",
+      desktopBootstrapToken: this.#state.desktopBootstrapToken,
+      tailscaleServeEnabled: false,
+      tailscaleServePort: 443,
+      serviceManaged: true,
+    };
+    const child = NodeChildProcess.spawn(
+      process.execPath,
+      [paths.entryPath, "__service-serve", "--bootstrap-fd", String(SERVICE_BOOTSTRAP_FD)],
+      {
+        env: { ...process.env, [SERVICE_LAUNCHER_CONTEXT_ENV]: JSON.stringify(context) },
+        stdio: ["ignore", "inherit", "inherit", "pipe", "ipc"],
+      },
+    );
+    const bootstrapPipe = child.stdio[SERVICE_BOOTSTRAP_FD] as NodeJS.WritableStream | null;
+    bootstrapPipe?.end(`${JSON.stringify(bootstrap)}\n`);
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error) => reject(error);
       child.once("error", onError);

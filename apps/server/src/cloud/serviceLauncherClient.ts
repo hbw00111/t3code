@@ -12,6 +12,7 @@ import {
   SERVICE_LAUNCHER_CONTEXT_ENV,
   type ServiceLauncherChildMessage,
   type ServiceLauncherParentMessage,
+  type ServiceRuntimeSource,
 } from "./serviceProtocol.ts";
 
 export class ServiceLauncherClientError extends Schema.TaggedErrorClass<ServiceLauncherClientError>()(
@@ -100,6 +101,7 @@ export class ServiceLauncherClient extends Context.Service<
   ServiceLauncherClient,
   {
     readonly managed: boolean;
+    readonly runtimeSource: ServiceRuntimeSource | undefined;
     readonly requestUpdate: (input: {
       readonly targetVersion: string;
       readonly dbPath: string;
@@ -131,21 +133,21 @@ const resolveStartup = Effect.fn("cloud.service_launcher_client.resolve_startup"
       return yield* new ServiceLauncherClientError({ operation: "ipc-unavailable" });
     }
 
-    return { host, context, managed };
+    return { host, context, managed, runtimeSource: context?.runtimeSource };
   },
 );
 
 export const resolveServiceLauncherMode = Effect.fn("cloud.service_launcher_client.resolve_mode")(
   function* () {
-    const { managed } = yield* resolveStartup();
-    return { managed };
+    const { managed, runtimeSource } = yield* resolveStartup();
+    return { managed, runtimeSource };
   },
 );
 
 export const make = Effect.fn("cloud.service_launcher_client.make")(function* (options?: {
   readonly currentVersion?: string;
 }) {
-  const { host, context, managed } = yield* resolveStartup(options);
+  const { host, context, managed, runtimeSource } = yield* resolveStartup(options);
 
   const exchange = (
     message: ServiceLauncherChildMessage,
@@ -245,6 +247,7 @@ export const make = Effect.fn("cloud.service_launcher_client.make")(function* (o
 
   return ServiceLauncherClient.of({
     managed,
+    runtimeSource,
     requestUpdate,
     prepareTrial,
   });

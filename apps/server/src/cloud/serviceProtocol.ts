@@ -1,8 +1,10 @@
 import type { ServerSelfUpdateOutcome } from "@t3tools/contracts";
 
-/** Protocol 2 snapshots SQLite before trials so migrations can be rolled back safely. */
-export const SERVICE_LAUNCHER_PROTOCOL = 2 as const;
+/** Protocol 3 adds the runtime source and persistent desktop bootstrap credential. */
+export const SERVICE_LAUNCHER_PROTOCOL = 3 as const;
 export const SERVICE_LAUNCHER_CONTEXT_ENV = "T3_SERVICE_LAUNCHER_CONTEXT";
+export const SERVICE_KEEP_AWAKE_ENV = "T3_SERVICE_KEEP_AWAKE";
+export const SERVICE_BOOTSTRAP_FD = 3 as const;
 export const SERVICE_LAUNCHER_FILE = "service-launcher.mjs";
 export const SERVICE_STATE_FILE = "service-state.json";
 /** Written by the launcher just before an explicit stop kills its child, so
@@ -20,9 +22,13 @@ export interface PendingServiceUpdate {
 
 export type ServiceUpdateRecord = PendingServiceUpdate | ServerSelfUpdateOutcome;
 
+export type ServiceRuntimeSource = "registry" | "desktop-bundle";
+
 export interface ServiceState {
   readonly protocol: typeof SERVICE_LAUNCHER_PROTOCOL;
   readonly activeVersion: string;
+  readonly runtimeSource: ServiceRuntimeSource;
+  readonly desktopBootstrapToken: string;
   readonly update?: ServiceUpdateRecord;
 }
 
@@ -30,6 +36,7 @@ export interface ServiceState {
 export interface ServiceLauncherContext {
   readonly protocol: typeof SERVICE_LAUNCHER_PROTOCOL;
   readonly childVersion: string;
+  readonly runtimeSource: ServiceRuntimeSource;
   readonly update?: ServiceUpdateRecord;
 }
 
@@ -70,6 +77,9 @@ export const isExactServiceVersion = (version: string): boolean =>
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const decodeRuntimeSource = (value: unknown): ServiceRuntimeSource | undefined =>
+  value === "registry" || value === "desktop-bundle" ? value : undefined;
 
 export function decodeServiceUpdate(value: unknown): ServiceUpdateRecord | undefined {
   if (!isRecord(value)) return undefined;
@@ -145,10 +155,14 @@ export function compareExactServiceVersions(left: string, right: string): number
 export function decodeServiceState(value: unknown): ServiceState | undefined {
   if (!isRecord(value)) return undefined;
   const update = value.update === undefined ? undefined : decodeServiceUpdate(value.update);
+  const runtimeSource = decodeRuntimeSource(value.runtimeSource);
   if (
     value.protocol !== SERVICE_LAUNCHER_PROTOCOL ||
     typeof value.activeVersion !== "string" ||
     !isExactServiceVersion(value.activeVersion) ||
+    runtimeSource === undefined ||
+    typeof value.desktopBootstrapToken !== "string" ||
+    value.desktopBootstrapToken.trim() === "" ||
     (value.update !== undefined && update === undefined) ||
     (update !== undefined &&
       compareExactServiceVersions(update.targetVersion, update.fromVersion) <= 0) ||
@@ -162,6 +176,8 @@ export function decodeServiceState(value: unknown): ServiceState | undefined {
   return {
     protocol: SERVICE_LAUNCHER_PROTOCOL,
     activeVersion: value.activeVersion,
+    runtimeSource,
+    desktopBootstrapToken: value.desktopBootstrapToken,
     ...(update === undefined ? {} : { update }),
   };
 }
@@ -195,7 +211,8 @@ export function decodeServiceLauncherContext(value: string): ServiceLauncherCont
     !isRecord(parsed) ||
     parsed.protocol !== SERVICE_LAUNCHER_PROTOCOL ||
     typeof parsed.childVersion !== "string" ||
-    !isExactServiceVersion(parsed.childVersion)
+    !isExactServiceVersion(parsed.childVersion) ||
+    decodeRuntimeSource(parsed.runtimeSource) === undefined
   ) {
     return undefined;
   }
@@ -213,6 +230,7 @@ export function decodeServiceLauncherContext(value: string): ServiceLauncherCont
   return {
     protocol: SERVICE_LAUNCHER_PROTOCOL,
     childVersion: parsed.childVersion,
+    runtimeSource: decodeRuntimeSource(parsed.runtimeSource)!,
     ...(update === undefined ? {} : { update }),
   };
 }

@@ -28,10 +28,12 @@ it("keeps systemd pinned to the stable launcher rather than a versioned server",
     baseDir: "/home/theo/.t3",
     logPath: "/home/theo/.t3/userdata/logs/boot-service.log",
     unitPath: "/home/theo/.config/systemd/user/t3code.service",
+    environment: { ELECTRON_RUN_AS_NODE: "1" },
   });
 
   expect(unit).toContain("ExecStart=/usr/bin/node /home/theo/.t3/runtime/service-launcher.mjs");
   expect(unit).toContain("KillMode=mixed");
+  expect(unit).toContain("Environment=ELECTRON_RUN_AS_NODE=1");
   expect(unit).not.toContain("versions/1.2.3");
 });
 
@@ -45,6 +47,24 @@ it("survives the kernel OOM-killing a greedy agent child", () => {
   });
 
   expect(unit).toContain("OOMPolicy=continue");
+});
+
+it("renders a self-restarting macOS LaunchAgent with a wake assertion", () => {
+  const unit = BootService.renderBootServiceLaunchAgent({
+    nodePath: "/usr/local/bin/node",
+    launcherPath: "/Users/theo/T3 & Code/runtime/service-launcher.mjs",
+    baseDir: "/Users/theo/T3 & Code",
+    logPath: "/Users/theo/T3 & Code/userdata/logs/boot-service.log",
+    unitPath: "/Users/theo/Library/LaunchAgents/com.t3tools.t3code.service.plist",
+    environment: { ELECTRON_RUN_AS_NODE: "1" },
+  });
+
+  expect(unit).toContain("<string>com.t3tools.t3code.service</string>");
+  expect(unit).toContain("<string>/Users/theo/T3 &amp; Code</string>");
+  expect(unit).toContain("<key>T3_SERVICE_KEEP_AWAKE</key>");
+  expect(unit).toContain("<key>ELECTRON_RUN_AS_NODE</key>\n    <string>1</string>");
+  expect(unit).toContain("<key>KeepAlive</key>\n  <true/>");
+  expect(unit).not.toContain("versions/1.2.3");
 });
 
 const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
@@ -90,6 +110,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
     cliVersion: "1.2.3",
     host: {
       execPath: "/usr/bin/node",
+      uid: 501,
       ...(usePinnedLauncher ? {} : { launcherSourcePath: sourceLauncher }),
     },
   }).pipe(
@@ -115,6 +136,8 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       expect(parseServiceState(yield* fs.readFileString(statePath))).toEqual({
         protocol: SERVICE_LAUNCHER_PROTOCOL,
         activeVersion: "1.2.3",
+        runtimeSource: "registry",
+        desktopBootstrapToken: expect.stringMatching(/^[0-9a-f]{48}$/),
       });
       expect(yield* fs.readFileString(plan.launcherPath)).toBe("export {};\n");
       expect((yield* service.status).current).toBe(true);
@@ -122,6 +145,8 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       const pendingState = JSON.stringify({
         protocol: SERVICE_LAUNCHER_PROTOCOL,
         activeVersion: "1.2.3",
+        runtimeSource: "registry",
+        desktopBootstrapToken: "persistent-desktop-credential",
         update: {
           id: "u",
           fromVersion: "1.2.3",
@@ -146,6 +171,35 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       expect(yield* fs.readFileString(plan.launcherPath)).toBe(
         "export const source = 'pinned runtime';\n",
       );
+    }),
+  );
+
+  it.effect("preserves the desktop credential while repairing the service", () =>
+    Effect.gen(function* () {
+      const { service, fs, statePath } = yield* makeHarness();
+      yield* service.install;
+      const first = parseServiceState(yield* fs.readFileString(statePath));
+      expect(first).toBeDefined();
+
+      yield* service.install;
+      const second = parseServiceState(yield* fs.readFileString(statePath));
+      expect(second?.desktopBootstrapToken).toBe(first?.desktopBootstrapToken);
+    }),
+  );
+
+  it.effect("installs and removes a loaded macOS LaunchAgent", () =>
+    Effect.gen(function* () {
+      const { service, commands } = yield* makeHarness("darwin");
+      const plan = yield* service.install;
+
+      expect(plan.unitPath).toContain("/Library/LaunchAgents/com.t3tools.t3code.service.plist");
+      expect((yield* service.status).current).toBe(true);
+      expect(commands.some((command) => command.startsWith("systemctl "))).toBe(false);
+      expect(commands).toContain(`launchctl bootstrap gui/501 ${plan.unitPath}`);
+
+      expect(yield* service.uninstall).toBe(true);
+      expect(commands).toContain(`launchctl bootout gui/501 ${plan.unitPath}`);
+      expect((yield* service.status).installed).toBe(false);
     }),
   );
 
@@ -186,16 +240,13 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
 
       expect((yield* service.install.pipe(Effect.flip))._tag).toBe("BootServiceUpdatePendingError");
       expect(serviceStateHasPendingUpdate(yield* fs.readFileString(statePath))).toBe(true);
-      expect(commands.filter((command) => command.startsWith("systemctl "))).toEqual([
-        "systemctl --user stop t3code.service",
-        "systemctl --user restart t3code.service",
-      ]);
+      expect(commands.filter((command) => command.startsWith("systemctl "))).toEqual([]);
     }),
   );
 
-  it.effect("fails closed off Linux", () =>
+  it.effect("fails closed off supported service-manager platforms", () =>
     Effect.gen(function* () {
-      const { service } = yield* makeHarness("darwin");
+      const { service } = yield* makeHarness("win32");
       expect((yield* service.status).supported).toBe(false);
       expect((yield* service.install.pipe(Effect.flip))._tag).toBe("BootServiceUnsupportedError");
     }),

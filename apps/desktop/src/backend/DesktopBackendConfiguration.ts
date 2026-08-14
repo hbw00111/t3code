@@ -14,6 +14,7 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import serverPackageJson from "../../../server/package.json" with { type: "json" };
 
+import * as DesktopBackgroundService from "./DesktopBackgroundService.ts";
 import * as DesktopBackendManager from "./DesktopBackendManager.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopServerExposure from "./DesktopServerExposure.ts";
@@ -611,6 +612,7 @@ export const make = Effect.gen(function* () {
   const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
   const wslEnvironment = yield* DesktopWslEnvironment.DesktopWslEnvironment;
   const settings = yield* DesktopAppSettings.DesktopAppSettings;
+  const backgroundService = yield* DesktopBackgroundService.DesktopBackgroundService;
   const crypto = yield* Crypto.Crypto;
   // SynchronizedRef (not a plain Ref) so the read-generate-write is atomic.
   // crypto.randomBytes is a yield point, and resolvePrimary + resolveWsl can
@@ -681,6 +683,32 @@ export const make = Effect.gen(function* () {
     );
   });
 
+  const buildAttachedPrimaryConfig = (
+    prepared: DesktopBackgroundService.PreparedDesktopBackgroundService,
+  ): DesktopBackendManager.DesktopBackendStartConfig => ({
+    lifecycle: "attached",
+    executablePath: process.execPath,
+    args: [],
+    entryPath: prepared.entryPath,
+    cwd: environment.homeDirectory,
+    env: {},
+    extendEnv: false,
+    bootstrap: {
+      mode: "desktop",
+      noBrowser: true,
+      port: prepared.port,
+      t3Home: environment.baseDir,
+      host: prepared.httpBaseUrl.hostname,
+      desktopBootstrapToken: prepared.desktopBootstrapToken,
+      tailscaleServeEnabled: false,
+      tailscaleServePort: 443,
+    },
+    bootstrapDelivery: "fd3",
+    httpBaseUrl: prepared.httpBaseUrl,
+    captureOutput: false,
+    preflightFailure: Option.none(),
+  });
+
   // Single source of truth for what the primary actually runs as. Both
   // the start-config dispatch and the renderer-facing label derive from
   // this, so they can't disagree — e.g. the label reading "WSL" while the
@@ -706,6 +734,10 @@ export const make = Effect.gen(function* () {
       const { useWsl, wslRequested } = yield* describePrimary;
       if (useWsl) {
         return yield* buildWslPrimaryConfig;
+      }
+      const prepared = yield* backgroundService.prepare;
+      if (Option.isSome(prepared)) {
+        return buildAttachedPrimaryConfig(prepared.value);
       }
       if (wslRequested) {
         yield* Effect.logWarning(

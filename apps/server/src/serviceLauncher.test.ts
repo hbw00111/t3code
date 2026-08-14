@@ -13,6 +13,11 @@ import {
   SERVICE_STOP_MARKER_FILE,
 } from "./cloud/serviceProtocol.ts";
 
+const serviceIdentity = {
+  runtimeSource: "registry",
+  desktopBootstrapToken: "persistent-desktop-credential",
+} as const;
+
 it("accepts only exact semantic versions", () => {
   for (const version of ["0.0.0", "1.2.3", "1.2.3-alpha.1", "1.2.3-0", "1.2.3+001"]) {
     assert.isTrue(isExactServiceVersion(version), version);
@@ -85,6 +90,7 @@ it.layer(NodeServices.layer)("service state persistence", (it) => {
       const state = {
         protocol: SERVICE_LAUNCHER_PROTOCOL,
         activeVersion: "0.0.31",
+        ...serviceIdentity,
       } as const;
 
       yield* Effect.promise(() => writeServiceState(statePath, state));
@@ -107,6 +113,7 @@ it.layer(NodeServices.layer)("service state persistence", (it) => {
         writeServiceState(statePath, {
           protocol: SERVICE_LAUNCHER_PROTOCOL,
           activeVersion: "1.0.0",
+          ...serviceIdentity,
         }),
       );
 
@@ -158,6 +165,7 @@ if (context.update?.status === "pending") {
         writeServiceState(statePath, {
           protocol: SERVICE_LAUNCHER_PROTOCOL,
           activeVersion: "1.0.0",
+          ...serviceIdentity,
         }),
       );
 
@@ -208,6 +216,7 @@ if (context.update?.status === "pending") {
         writeServiceState(statePath, {
           protocol: SERVICE_LAUNCHER_PROTOCOL,
           activeVersion: "1.0.0",
+          ...serviceIdentity,
         }),
       );
 
@@ -267,6 +276,7 @@ if (context.update?.status === "pending") {
         writeServiceState(statePath, {
           protocol: SERVICE_LAUNCHER_PROTOCOL,
           activeVersion: "1.0.0",
+          ...serviceIdentity,
         }),
       );
 

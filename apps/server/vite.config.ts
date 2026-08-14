@@ -16,6 +16,19 @@ export function shouldBundleCliDependency(id: string): boolean {
   return bundledPackagePrefixes.some((prefix) => id.startsWith(prefix));
 }
 
+export function shouldBundleDesktopServiceDependency(id: string): boolean {
+  return (
+    id !== "@effect/sql-sqlite-bun" &&
+    !id.startsWith("@effect/sql-sqlite-bun/") &&
+    id !== "@ff-labs/fff-node" &&
+    !id.startsWith("@ff-labs/fff-node/") &&
+    id !== "ffi-rs" &&
+    !id.startsWith("ffi-rs/") &&
+    id !== "node-pty" &&
+    !id.startsWith("node-pty/")
+  );
+}
+
 const repoEnv = loadRepoEnv();
 const cliBuildChannel = packageJson.version.includes("-nightly.") ? "nightly" : "latest";
 
@@ -31,38 +44,73 @@ export default mergeConfig(
         },
       },
     },
-    pack: {
-      entry: ["src/bin.ts"],
-      outDir: "dist",
-      sourcemap: true,
-      clean: true,
-      deps: {
-        alwaysBundle: shouldBundleCliDependency,
-        onlyBundle: false,
+    pack: [
+      {
+        entry: ["src/bin.ts"],
+        outDir: "dist",
+        sourcemap: true,
+        clean: true,
+        deps: {
+          alwaysBundle: shouldBundleCliDependency,
+          onlyBundle: false,
+        },
+        banner: {
+          js: "#!/usr/bin/env node\n",
+        },
+        define: {
+          __T3CODE_BUILD_CHANNEL__: JSON.stringify(cliBuildChannel),
+          __T3CODE_BUILD_RELAY_URL__: JSON.stringify(repoEnv.T3CODE_RELAY_URL?.trim() ?? ""),
+          __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(
+            repoEnv.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() ?? "",
+          ),
+          __T3CODE_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__: JSON.stringify(
+            repoEnv.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID?.trim() ?? "",
+          ),
+          __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_URL__: JSON.stringify(
+            repoEnv.T3CODE_RELAY_CLIENT_OTLP_TRACES_URL?.trim() ?? "",
+          ),
+          __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_DATASET__: JSON.stringify(
+            repoEnv.T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET?.trim() ?? "",
+          ),
+          __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_TOKEN__: JSON.stringify(
+            repoEnv.T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN?.trim() ?? "",
+          ),
+        },
       },
-      banner: {
-        js: "#!/usr/bin/env node\n",
+      {
+        entry: ["src/bin.ts"],
+        outDir: "dist-service",
+        sourcemap: false,
+        clean: true,
+        deps: {
+          alwaysBundle: shouldBundleDesktopServiceDependency,
+          neverBundle: ["@effect/sql-sqlite-bun", "@ff-labs/fff-node", "ffi-rs", "node-pty"],
+          onlyBundle: false,
+        },
+        banner: {
+          js: "#!/usr/bin/env node\n",
+        },
+        define: {
+          __T3CODE_BUILD_CHANNEL__: JSON.stringify(cliBuildChannel),
+          __T3CODE_BUILD_RELAY_URL__: JSON.stringify(repoEnv.T3CODE_RELAY_URL?.trim() ?? ""),
+          __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(
+            repoEnv.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() ?? "",
+          ),
+          __T3CODE_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__: JSON.stringify(
+            repoEnv.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID?.trim() ?? "",
+          ),
+          __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_URL__: JSON.stringify(
+            repoEnv.T3CODE_RELAY_CLIENT_OTLP_TRACES_URL?.trim() ?? "",
+          ),
+          __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_DATASET__: JSON.stringify(
+            repoEnv.T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET?.trim() ?? "",
+          ),
+          __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_TOKEN__: JSON.stringify(
+            repoEnv.T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN?.trim() ?? "",
+          ),
+        },
       },
-      define: {
-        __T3CODE_BUILD_CHANNEL__: JSON.stringify(cliBuildChannel),
-        __T3CODE_BUILD_RELAY_URL__: JSON.stringify(repoEnv.T3CODE_RELAY_URL?.trim() ?? ""),
-        __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(
-          repoEnv.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() ?? "",
-        ),
-        __T3CODE_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__: JSON.stringify(
-          repoEnv.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID?.trim() ?? "",
-        ),
-        __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_URL__: JSON.stringify(
-          repoEnv.T3CODE_RELAY_CLIENT_OTLP_TRACES_URL?.trim() ?? "",
-        ),
-        __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_DATASET__: JSON.stringify(
-          repoEnv.T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET?.trim() ?? "",
-        ),
-        __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_TOKEN__: JSON.stringify(
-          repoEnv.T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN?.trim() ?? "",
-        ),
-      },
-    },
+    ],
     test: {
       // The server suite exercises sqlite, git, temp worktrees, and orchestration
       // runtimes heavily. Running files in parallel introduces load-sensitive flakes.

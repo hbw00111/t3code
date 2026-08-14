@@ -365,6 +365,7 @@ const DesktopBuildInputArtifact = Schema.Literals([
   "desktop-dist",
   "desktop-resources",
   "server-dist",
+  "server-service-dist",
   "bundled-server-client",
 ]);
 type DesktopBuildInputArtifact = typeof DesktopBuildInputArtifact.Type;
@@ -372,6 +373,7 @@ const desktopBuildInputArtifactNames = {
   "desktop-dist": "desktopDist",
   "desktop-resources": "desktopResources",
   "server-dist": "serverDist",
+  "server-service-dist": "serverServiceDist",
   "bundled-server-client": "bundled server client",
 } satisfies Record<DesktopBuildInputArtifact, string>;
 
@@ -645,6 +647,10 @@ export const DESKTOP_EXTRA_RESOURCES = [
     from: "apps/desktop/prod-resources/resource-monitor",
     to: "resource-monitor",
   },
+  {
+    from: "apps/desktop/prod-resources/t3-runtime",
+    to: "t3-runtime",
+  },
 ] as const;
 
 export interface MacPasskeySigningConfiguration {
@@ -890,6 +896,39 @@ export function resolveFffNativeDependencies(
   );
 }
 
+export function resolveFfiNativeDependencies(
+  platform: typeof BuildPlatform.Type,
+  arch: typeof BuildArch.Type,
+  version: string,
+): Record<string, string> {
+  const architectures = arch === "universal" ? (["arm64", "x64"] as const) : [arch];
+
+  if (platform === "mac") {
+    return Object.fromEntries(
+      architectures.map((architecture) => [`@yuuang/ffi-rs-darwin-${architecture}`, version]),
+    );
+  }
+
+  if (platform === "win") {
+    return Object.fromEntries(
+      architectures.map((architecture) => [`@yuuang/ffi-rs-win32-${architecture}-msvc`, version]),
+    );
+  }
+
+  return Object.fromEntries(
+    architectures.map((architecture) => [`@yuuang/ffi-rs-linux-${architecture}-gnu`, version]),
+  );
+}
+
+export function resolveNodePtyPrebuildDirectories(
+  platform: typeof BuildPlatform.Type,
+  arch: typeof BuildArch.Type,
+): readonly string[] {
+  const architectures = arch === "universal" ? (["arm64", "x64"] as const) : [arch];
+  const platformName = platform === "mac" ? "darwin" : platform === "win" ? "win32" : "linux";
+  return architectures.map((architecture) => `${platformName}-${architecture}`);
+}
+
 export interface ClerkPasskeyNativeArtifact {
   readonly packageName: string;
   readonly binaryFileName: string;
@@ -949,6 +988,96 @@ const stageClerkPasskeyNativeBinaries = Effect.fn("stageClerkPasskeyNativeBinari
     });
     yield* fs.copyFile(sourcePath, path.join(packageDir, artifact.binaryFileName));
   }
+});
+
+export const stageDesktopServiceBundle = Effect.fn("stageDesktopServiceBundle")(function* (input: {
+  readonly sourceDir: string;
+  readonly destinationDir: string;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  yield* fs.copy(input.sourceDir, input.destinationDir);
+});
+
+const stageDesktopServiceRuntime = Effect.fn("stageDesktopServiceRuntime")(function* (input: {
+  readonly stageAppDir: string;
+  readonly stageProdResourcesDir: string;
+  readonly serverServiceDist: string;
+  readonly version: string;
+  readonly platform: typeof BuildPlatform.Type;
+  readonly arch: typeof BuildArch.Type;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const runtimeDir = path.join(
+    input.stageProdResourcesDir,
+    "t3-runtime",
+    "versions",
+    input.version,
+  );
+  const runtimeNodeModules = path.join(runtimeDir, "node_modules");
+  const t3PackageDir = path.join(runtimeNodeModules, "t3");
+  const t3DistDir = path.join(t3PackageDir, "dist");
+  yield* stageDesktopServiceBundle({
+    sourceDir: input.serverServiceDist,
+    destinationDir: t3DistDir,
+  });
+  const t3PackageJson = yield* encodeJsonString({
+    name: "t3",
+    version: input.version,
+    type: "module",
+  });
+  yield* Effect.all([
+    fs.writeFileString(path.join(t3PackageDir, "package.json"), `${t3PackageJson}\n`),
+    fs.writeFileString(path.join(runtimeDir, ".install-complete"), `${input.version}\n`),
+  ]);
+
+  const copyInstalledPackage = Effect.fn("stageDesktopServiceRuntime.copyPackage")(function* (
+    packageName: string,
+  ) {
+    const packageSegments = packageName.split("/");
+    const source = yield* fs.realPath(
+      path.join(input.stageAppDir, "node_modules", ...packageSegments),
+    );
+    const destination = path.join(runtimeNodeModules, ...packageSegments);
+    yield* fs.makeDirectory(path.dirname(destination), { recursive: true });
+    yield* fs.copy(source, destination);
+  });
+
+  const nativePackages = [
+    ...Object.keys(
+      resolveFffNativeDependencies(
+        input.platform,
+        input.arch,
+        serverPackageJson.dependencies["@ff-labs/fff-node"],
+      ),
+    ),
+    ...Object.keys(
+      resolveFfiNativeDependencies(
+        input.platform,
+        input.arch,
+        serverPackageJson.dependencies["ffi-rs"],
+      ),
+    ),
+  ];
+  yield* Effect.forEach(
+    ["node-pty", "@ff-labs/fff-node", "ffi-rs", ...nativePackages],
+    copyInstalledPackage,
+    { discard: true },
+  );
+
+  const nodePtyPrebuilds = path.join(runtimeNodeModules, "node-pty", "prebuilds");
+  if (yield* fs.exists(nodePtyPrebuilds)) {
+    const retained = new Set(resolveNodePtyPrebuildDirectories(input.platform, input.arch));
+    const directories = yield* fs.readDirectory(nodePtyPrebuilds);
+    yield* Effect.forEach(
+      directories.filter((directory) => !retained.has(directory)),
+      (directory) =>
+        fs.remove(path.join(nodePtyPrebuilds, directory), { recursive: true, force: true }),
+      { discard: true },
+    );
+  }
+
+  return runtimeDir;
 });
 
 export function createStageWorkspaceConfig(input: {
@@ -1788,6 +1917,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     desktopDist: path.join(repoRoot, "apps/desktop/dist-electron"),
     desktopResources: path.join(repoRoot, "apps/desktop/resources"),
     serverDist: path.join(repoRoot, "apps/server/dist"),
+    serverServiceDist: path.join(repoRoot, "apps/server/dist-service"),
   };
   const bundledClientEntry = path.join(distDirs.serverDist, "client/index.html");
 
@@ -1807,6 +1937,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     { artifact: "desktop-dist", artifactPath: distDirs.desktopDist },
     { artifact: "desktop-resources", artifactPath: distDirs.desktopResources },
     { artifact: "server-dist", artifactPath: distDirs.serverDist },
+    { artifact: "server-service-dist", artifactPath: distDirs.serverServiceDist },
   ] as const;
   for (const input of requiredBuildInputs) {
     if (!(yield* fs.exists(input.artifactPath))) {
@@ -1895,6 +2026,11 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       options.arch,
       serverPackageJson.dependencies["@ff-labs/fff-node"],
     ),
+    ...resolveFfiNativeDependencies(
+      options.platform,
+      options.arch,
+      serverPackageJson.dependencies["ffi-rs"],
+    ),
     // Windows artifacts also bundle the same-architecture WSL Linux backend, which loads the
     // fff native binary through ffi-rs. The platform fff binary above is the
     // host's (win32), so promote the matching Linux fff binaries too; without
@@ -1904,6 +2040,13 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
           "linux",
           options.arch,
           serverPackageJson.dependencies["@ff-labs/fff-node"],
+        )
+      : {}),
+    ...(options.platform === "win"
+      ? resolveFfiNativeDependencies(
+          "linux",
+          options.arch,
+          serverPackageJson.dependencies["ffi-rs"],
         )
       : {}),
   };
@@ -1970,6 +2113,14 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     { label: "vp install --prod", verbose: options.verbose },
   );
   yield* stageClerkPasskeyNativeBinaries(stageAppDir, options.platform, options.arch);
+  yield* stageDesktopServiceRuntime({
+    stageAppDir,
+    stageProdResourcesDir: path.join(stageAppDir, "apps/desktop/prod-resources"),
+    serverServiceDist: distDirs.serverServiceDist,
+    version: appVersion,
+    platform: options.platform,
+    arch: options.arch,
+  });
 
   // WSL is Windows-only, so only the Windows artifact carries the Linux backend
   // binary; other platforms ignore the prebuild input.

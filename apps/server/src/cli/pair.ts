@@ -130,6 +130,55 @@ export class ServePortOccupiedError extends Schema.TaggedErrorClass<ServePortOcc
   }
 }
 
+export class PairingUrlConflictError extends Schema.TaggedErrorClass<PairingUrlConflictError>()(
+  "PairingUrlConflictError",
+  {},
+) {
+  override get message(): string {
+    return "Pass either --url or --tailscale, not both.";
+  }
+}
+
+export class PairingUrlProtocolError extends Schema.TaggedErrorClass<PairingUrlProtocolError>()(
+  "PairingUrlProtocolError",
+  { url: Schema.String },
+) {
+  override get message(): string {
+    return `Pairing URL must use HTTP or HTTPS: ${this.url}`;
+  }
+}
+
+export class PairingUrlUnreachableError extends Schema.TaggedErrorClass<PairingUrlUnreachableError>()(
+  "PairingUrlUnreachableError",
+  { url: Schema.String },
+) {
+  override get message(): string {
+    return `Could not reach the T3 Code environment at ${this.url}.`;
+  }
+}
+
+export class PairingUrlNotT3Error extends Schema.TaggedErrorClass<PairingUrlNotT3Error>()(
+  "PairingUrlNotT3Error",
+  { url: Schema.String },
+) {
+  override get message(): string {
+    return `${this.url} does not serve a T3 Code environment.`;
+  }
+}
+
+export class PairingUrlEnvironmentMismatchError extends Schema.TaggedErrorClass<PairingUrlEnvironmentMismatchError>()(
+  "PairingUrlEnvironmentMismatchError",
+  {
+    url: Schema.String,
+    expectedEnvironmentId: Schema.String,
+    actualEnvironmentId: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `${this.url} points to a different T3 Code environment.`;
+  }
+}
+
 /** The URL a browser or phone should pair through, absent Tailscale. */
 export const resolveDirectPairingBaseUrl = (state: PersistedServerRuntimeState): string =>
   state.devUrl ?? resolveHeadlessConnectionString(state.host, state.port);
@@ -432,6 +481,32 @@ const resolveTailscalePairingBase = Effect.fn("pair.resolveTailscalePairingBase"
   },
 );
 
+const resolvePublicPairingBase = Effect.fn("pair.resolvePublicPairingBase")(function* (input: {
+  readonly target: DiscoveredPairTarget;
+  readonly url: URL;
+}) {
+  if (input.url.protocol !== "http:" && input.url.protocol !== "https:") {
+    return yield* new PairingUrlProtocolError({ url: input.url.toString() });
+  }
+
+  const baseUrl = input.url.origin;
+  const probed = yield* probeEnvironmentDescriptor(baseUrl);
+  if (probed._tag === "unreachable") {
+    return yield* new PairingUrlUnreachableError({ url: baseUrl });
+  }
+  if (probed._tag === "not-a-t3-server") {
+    return yield* new PairingUrlNotT3Error({ url: baseUrl });
+  }
+  if (probed.descriptor.environmentId !== input.target.descriptor.environmentId) {
+    return yield* new PairingUrlEnvironmentMismatchError({
+      url: baseUrl,
+      expectedEnvironmentId: input.target.descriptor.environmentId,
+      actualEnvironmentId: probed.descriptor.environmentId,
+    });
+  }
+  return baseUrl;
+});
+
 const mintPairingLink = Effect.fn("pair.mintPairingLink")(function* (input: {
   readonly config: ServerConfig.ServerConfig["Service"];
   readonly ttl: Option.Option<Duration.Duration>;
@@ -475,6 +550,12 @@ const tailscaleFlag = Flag.boolean("tailscale").pipe(
   Flag.withDefault(false),
 );
 
+const urlFlag = Flag.string("url").pipe(
+  Flag.withSchema(Schema.URLFromString),
+  Flag.withDescription("Public HTTP or HTTPS URL that already routes to this T3 Code server."),
+  Flag.optional,
+);
+
 const tailscaleServePortFlag = Flag.integer("tailscale-serve-port").pipe(
   Flag.withSchema(PortSchema),
   Flag.withDescription("HTTPS port for Tailscale Serve when --tailscale is enabled."),
@@ -485,6 +566,7 @@ export const pairCommand = Command.make("pair", {
   baseDir: baseDirFlag,
   ttl: ttlFlag,
   label: labelFlag,
+  url: urlFlag,
   tailscale: tailscaleFlag,
   tailscaleServePort: tailscaleServePortFlag,
 }).pipe(
@@ -498,11 +580,17 @@ export const pairCommand = Command.make("pair", {
       // an explicit --log-level still wins.
       const logLevel = Option.getOrElse(cliLogLevel, () => "Warn" as const);
 
+      if (flags.tailscale && Option.isSome(flags.url)) {
+        return yield* new PairingUrlConflictError();
+      }
+
       const target = yield* discoverPairTarget(Option.getOrUndefined(flags.baseDir));
 
       const notes: Array<string> = [];
       let pairingBaseUrl: string;
-      if (flags.tailscale) {
+      if (Option.isSome(flags.url)) {
+        pairingBaseUrl = yield* resolvePublicPairingBase({ target, url: flags.url.value });
+      } else if (flags.tailscale) {
         const resolved = yield* resolveTailscalePairingBase({
           target,
           servePort: flags.tailscaleServePort,

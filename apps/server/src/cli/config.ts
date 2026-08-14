@@ -1,6 +1,6 @@
 import * as NetService from "@t3tools/shared/Net";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
-import { DesktopBackendBootstrap, PortSchema } from "@t3tools/contracts";
+import { DesktopBackendBootstrap, PortSchema, ServiceBackendBootstrap } from "@t3tools/contracts";
 import * as Config from "effect/Config";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -213,6 +213,7 @@ export const resolveServerConfig = (
   options?: {
     readonly startupPresentation?: ServerConfig.StartupPresentation;
     readonly forceAutoBootstrapProjectFromCwd?: boolean;
+    readonly serviceManaged?: boolean;
   },
 ) =>
   Effect.gen(function* () {
@@ -235,11 +236,16 @@ export const resolveServerConfig = (
       tailscaleServePort: flags.tailscaleServePort ?? Option.none(),
     } satisfies CliServerFlags;
     const bootstrapFd = Option.getOrUndefined(normalizedFlags.bootstrapFd) ?? env.bootstrapFd;
-    const bootstrapEnvelope =
-      bootstrapFd !== undefined
-        ? yield* readBootstrapEnvelope(DesktopBackendBootstrap, bootstrapFd)
-        : Option.none();
-    const bootstrap = Option.getOrUndefined(bootstrapEnvelope);
+    const bootstrap =
+      bootstrapFd === undefined
+        ? undefined
+        : options?.serviceManaged
+          ? Option.getOrUndefined(
+              yield* readBootstrapEnvelope(ServiceBackendBootstrap, bootstrapFd),
+            )
+          : Option.getOrUndefined(
+              yield* readBootstrapEnvelope(DesktopBackendBootstrap, bootstrapFd),
+            );
 
     const mode: ServerConfig.RuntimeMode = Option.getOrElse(
       resolveOptionPrecedence(

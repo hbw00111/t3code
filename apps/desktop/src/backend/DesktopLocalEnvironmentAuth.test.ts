@@ -1,10 +1,12 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Duration from "effect/Duration";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+import * as TestClock from "effect/testing/TestClock";
 import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
 
 import * as DesktopBackendPool from "./DesktopBackendPool.ts";
@@ -76,6 +78,56 @@ describe("DesktopLocalEnvironmentAuth", () => {
       assert.strictEqual(first, "desktop-bearer-token");
       assert.strictEqual(second, "desktop-bearer-token");
       assert.strictEqual(yield* Ref.get(requestCount), 1);
+    }),
+  );
+
+  it.effect("refreshes the bearer token before it expires", () =>
+    Effect.gen(function* () {
+      const requestCount = yield* Ref.make(0);
+      const httpClientLayer = Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make((request) =>
+          Ref.updateAndGet(requestCount, (count) => count + 1).pipe(
+            Effect.map((count) =>
+              HttpClientResponse.fromWeb(
+                request,
+                new Response(
+                  JSON.stringify({
+                    access_token: `desktop-bearer-token-${count}`,
+                    issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+                    token_type: "Bearer",
+                    expires_in: 10,
+                    scope: "orchestration:read",
+                  }),
+                  { status: 200, headers: { "content-type": "application/json" } },
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      const poolLayer = Layer.succeed(DesktopBackendPool.DesktopBackendPool, {
+        list: Effect.succeed([
+          {
+            id: PRIMARY_LOCAL_ENVIRONMENT_ID,
+            label: Effect.succeed("Local environment"),
+            currentConfig: Effect.succeed(Option.some(config)),
+          },
+        ]),
+      } as unknown as DesktopBackendPool.DesktopBackendPool["Service"]);
+      const testLayer = DesktopLocalEnvironmentAuth.layer.pipe(
+        Layer.provide(Layer.mergeAll(poolLayer, httpClientLayer)),
+      );
+
+      const auth = yield* DesktopLocalEnvironmentAuth.DesktopLocalEnvironmentAuth.pipe(
+        Effect.provide(testLayer),
+      );
+      assert.strictEqual(yield* auth.getBearerToken, "desktop-bearer-token-1");
+      yield* TestClock.adjust(Duration.seconds(4));
+      assert.strictEqual(yield* auth.getBearerToken, "desktop-bearer-token-1");
+      yield* TestClock.adjust(Duration.seconds(1));
+      assert.strictEqual(yield* auth.getBearerToken, "desktop-bearer-token-2");
+      assert.strictEqual(yield* Ref.get(requestCount), 2);
     }),
   );
 });

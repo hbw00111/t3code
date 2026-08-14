@@ -280,6 +280,8 @@ describe("releaseManagedTunnelOnShutdown", () => {
         writeServiceState(statePath, {
           protocol: SERVICE_LAUNCHER_PROTOCOL,
           activeVersion: "0.0.30",
+          runtimeSource: "registry",
+          desktopBootstrapToken: "persistent-desktop-credential",
           update,
         }),
       );

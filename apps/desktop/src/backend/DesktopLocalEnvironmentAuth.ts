@@ -1,6 +1,7 @@
 import { bootstrapRemoteBearerSession } from "@t3tools/client-runtime/authorization";
 import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -42,18 +43,26 @@ export class DesktopLocalEnvironmentAuth extends Context.Service<
   }
 >()("@t3tools/desktop/backend/DesktopLocalEnvironmentAuth") {}
 
+const BEARER_REFRESH_SKEW_MILLIS = 5_000;
+
+interface CachedBearerToken {
+  readonly value: string;
+  readonly refreshAtEpochMillis: number;
+}
+
 export const make = Effect.gen(function* () {
   const pool = yield* DesktopBackendPool.DesktopBackendPool;
   const httpClient = yield* HttpClient.HttpClient;
-  const tokenRef = yield* Ref.make(Option.none<string>());
+  const tokenRef = yield* Ref.make(Option.none<CachedBearerToken>());
   const mutex = yield* Semaphore.make(1);
 
   const getBearerToken = mutex
     .withPermits(1)(
       Effect.gen(function* () {
         const cached = yield* Ref.get(tokenRef);
-        if (Option.isSome(cached)) {
-          return cached.value;
+        const now = yield* Clock.currentTimeMillis;
+        if (Option.isSome(cached) && now < cached.value.refreshAtEpochMillis) {
+          return cached.value.value;
         }
 
         const instances = yield* pool.list;
@@ -83,7 +92,15 @@ export const make = Effect.gen(function* () {
               }),
           ),
         );
-        yield* Ref.set(tokenRef, Option.some(session.access_token));
+        const issuedAt = yield* Clock.currentTimeMillis;
+        const expiresAt = issuedAt + Math.max(0, session.expires_in * 1_000);
+        yield* Ref.set(
+          tokenRef,
+          Option.some({
+            value: session.access_token,
+            refreshAtEpochMillis: Math.max(issuedAt, expiresAt - BEARER_REFRESH_SKEW_MILLIS),
+          }),
+        );
         return session.access_token;
       }),
     )

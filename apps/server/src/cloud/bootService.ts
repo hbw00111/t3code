@@ -1,9 +1,11 @@
 import { HostProcessExecutablePath, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Encoding from "effect/Encoding";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -19,15 +21,19 @@ import {
 import {
   SERVICE_LAUNCHER_FILE,
   SERVICE_LAUNCHER_PROTOCOL,
+  SERVICE_KEEP_AWAKE_ENV,
   SERVICE_STATE_FILE,
   parseServiceState,
   serviceStateHasPendingUpdate,
+  type ServiceRuntimeSource,
   type ServiceState,
 } from "./serviceProtocol.ts";
 
 const BOOT_SERVICE_NAME = "t3code";
 export const BOOT_SERVICE_UNIT_FILE = `${BOOT_SERVICE_NAME}.service`;
 export const BOOT_SERVICE_UNIT_ENV = "T3_BOOT_SERVICE_UNIT";
+export const BOOT_SERVICE_LAUNCH_AGENT_LABEL = "com.t3tools.t3code.service";
+export const BOOT_SERVICE_LAUNCH_AGENT_FILE = `${BOOT_SERVICE_LAUNCH_AGENT_LABEL}.plist`;
 
 /** systemd expands `%` specifiers, including in unquoted append-log paths. */
 export function escapeSystemdSpecifiers(value: string): string {
@@ -47,6 +53,16 @@ export interface BootServicePlan {
   readonly baseDir: string;
   readonly logPath: string;
   readonly unitPath: string;
+  readonly environment?: Readonly<Record<string, string>>;
+}
+
+function escapePlistValue(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
 }
 
 /** Pure renderer: service units cannot rely on the user's shell or PATH. */
@@ -63,6 +79,9 @@ export function renderBootServiceUnit(plan: BootServicePlan): string {
     "WorkingDirectory=%h",
     `Environment=T3CODE_HOME=${quoteSystemdValue(plan.baseDir)}`,
     `Environment=${BOOT_SERVICE_UNIT_ENV}=${BOOT_SERVICE_UNIT_FILE}`,
+    ...Object.entries(plan.environment ?? {})
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, value]) => `Environment=${key}=${quoteSystemdValue(value)}`),
     `ExecStart=${quoteSystemdValue(plan.nodePath)} ${quoteSystemdValue(plan.launcherPath)}`,
     // Let the launcher mark an explicit stop before it signals the server.
     // systemd still SIGKILLs the whole cgroup if graceful shutdown times out.
@@ -83,12 +102,60 @@ export function renderBootServiceUnit(plan: BootServicePlan): string {
   ].join("\n");
 }
 
+/** Pure renderer: LaunchAgents run without a login shell or inherited PATH. */
+export function renderBootServiceLaunchAgent(plan: BootServicePlan): string {
+  const string = (value: string) => `<string>${escapePlistValue(value)}</string>`;
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0">',
+    "<dict>",
+    "  <key>Label</key>",
+    `  ${string(BOOT_SERVICE_LAUNCH_AGENT_LABEL)}`,
+    "  <key>ProgramArguments</key>",
+    "  <array>",
+    `    ${string(plan.nodePath)}`,
+    `    ${string(plan.launcherPath)}`,
+    "  </array>",
+    "  <key>EnvironmentVariables</key>",
+    "  <dict>",
+    "    <key>T3CODE_HOME</key>",
+    `    ${string(plan.baseDir)}`,
+    `    <key>${BOOT_SERVICE_UNIT_ENV}</key>`,
+    `    ${string(BOOT_SERVICE_LAUNCH_AGENT_FILE)}`,
+    `    <key>${SERVICE_KEEP_AWAKE_ENV}</key>`,
+    "    <string>1</string>",
+    ...Object.entries(plan.environment ?? {})
+      .sort(([left], [right]) => left.localeCompare(right))
+      .flatMap(([key, value]) => [
+        `    <key>${escapePlistValue(key)}</key>`,
+        `    ${string(value)}`,
+      ]),
+    "  </dict>",
+    "  <key>KeepAlive</key>",
+    "  <true/>",
+    "  <key>RunAtLoad</key>",
+    "  <true/>",
+    "  <key>ThrottleInterval</key>",
+    "  <integer>5</integer>",
+    "  <key>ExitTimeOut</key>",
+    "  <integer>10</integer>",
+    "  <key>StandardOutPath</key>",
+    `  ${string(plan.logPath)}`,
+    "  <key>StandardErrorPath</key>",
+    `  ${string(plan.logPath)}`,
+    "</dict>",
+    "</plist>",
+    "",
+  ].join("\n");
+}
+
 export class BootServiceUnsupportedError extends Schema.TaggedErrorClass<BootServiceUnsupportedError>()(
   "BootServiceUnsupportedError",
   { platform: Schema.String },
 ) {
   override get message(): string {
-    return `Background setup currently supports Linux with systemd; this machine reports '${this.platform}'.`;
+    return `Background setup supports Linux with systemd and macOS with launchd; this machine reports '${this.platform}'.`;
   }
 }
 
@@ -153,12 +220,16 @@ export class BootService extends Context.Service<
 export interface BootServiceHost {
   readonly execPath: string;
   readonly launcherSourcePath?: string;
+  readonly uid?: number;
 }
 
 export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   readonly baseDir: string;
   readonly logsDir: string;
   readonly cliVersion: string;
+  readonly runtimeSource?: ServiceRuntimeSource;
+  readonly bundledRuntimeDir?: string;
+  readonly serviceEnvironment?: Readonly<Record<string, string>>;
   readonly host?: BootServiceHost;
 }) {
   const hostExecPath = yield* HostProcessExecutablePath;
@@ -167,10 +238,23 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const runner = yield* ProcessRunner.ProcessRunner;
+  const crypto = yield* Crypto.Crypto;
   const host = input.host ?? { execPath: hostExecPath };
+  const uid = host.uid ?? (typeof process.getuid === "function" ? process.getuid() : undefined);
+  const isLinux = platform === "linux";
+  const isMac = platform === "darwin";
+  const runtimeSource = input.runtimeSource ?? "registry";
+  const bundledRuntimeDir = input.bundledRuntimeDir;
+  const serviceEnvironment = {
+    ...(runtimeSource === "desktop-bundle" ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+    ...input.serviceEnvironment,
+  };
 
-  const unitDir = path.join(homeDir, ".config", "systemd", "user");
-  const unitPath = path.join(unitDir, BOOT_SERVICE_UNIT_FILE);
+  const unitDir = isMac
+    ? path.join(homeDir, "Library", "LaunchAgents")
+    : path.join(homeDir, ".config", "systemd", "user");
+  const unitFile = isMac ? BOOT_SERVICE_LAUNCH_AGENT_FILE : BOOT_SERVICE_UNIT_FILE;
+  const unitPath = path.join(unitDir, unitFile);
   const logPath = path.join(input.logsDir, "boot-service.log");
   const launcherPath = path.join(input.baseDir, "runtime", SERVICE_LAUNCHER_FILE);
   const statePath = path.join(input.baseDir, "runtime", SERVICE_STATE_FILE);
@@ -196,10 +280,15 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     baseDir: input.baseDir,
     logPath,
     unitPath,
+    ...(Object.keys(serviceEnvironment).length === 0 ? {} : { environment: serviceEnvironment }),
   };
+  const launchdDomain = `gui/${String(uid ?? "unknown")}`;
+  const launchdServiceTarget = `${launchdDomain}/${BOOT_SERVICE_LAUNCH_AGENT_LABEL}`;
+  const renderServiceDefinition = () =>
+    isMac ? renderBootServiceLaunchAgent(plan) : renderBootServiceUnit(plan);
 
-  const requireSystemdLinux = Effect.gen(function* () {
-    if (platform !== "linux" || homeDir === "") {
+  const requireSupportedPlatform = Effect.gen(function* () {
+    if ((!isLinux && !isMac) || homeDir === "" || (isMac && uid === undefined)) {
       return yield* new BootServiceUnsupportedError({ platform });
     }
   });
@@ -235,8 +324,49 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     );
   });
 
+  const isLaunchAgentLoaded = Effect.fn("cloud.boot_service.launch_agent_loaded")(function* () {
+    const result = yield* runner
+      .run({ command: "launchctl", args: ["print", launchdServiceTarget] })
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new BootServiceCommandError({ step: "checking the macOS background service", cause }),
+        ),
+      );
+    return result.code === 0;
+  });
+
+  const stopService = Effect.fn("cloud.boot_service.stop")(function* () {
+    if (isLinux) {
+      yield* runStep("stopping the installed service", "systemctl", [
+        "--user",
+        "stop",
+        BOOT_SERVICE_UNIT_FILE,
+      ]);
+      return;
+    }
+    yield* runStep("stopping the installed service", "launchctl", [
+      "bootout",
+      launchdDomain,
+      unitPath,
+    ]);
+  });
+
+  const startService = Effect.fn("cloud.boot_service.start")(function* (step: string) {
+    if (isLinux) {
+      yield* runStep(step, "systemctl", ["--user", "restart", BOOT_SERVICE_UNIT_FILE]);
+      return;
+    }
+    yield* runStep(step, "launchctl", ["bootstrap", launchdDomain, unitPath]);
+  });
+
   const install: BootService["Service"]["install"] = Effect.gen(function* () {
-    yield* requireSystemdLinux;
+    yield* requireSupportedPlatform;
+    if (runtimeSource === "desktop-bundle" && bundledRuntimeDir === undefined) {
+      return yield* new BootServiceInstallError({
+        cause: new Error("The bundled desktop service runtime is missing."),
+      });
+    }
     yield* fs
       .makeDirectory(input.logsDir, { recursive: true })
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
@@ -245,6 +375,13 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     yield* ensurePinnedRuntimeInstalled({
       baseDir: input.baseDir,
       version: input.cliVersion,
+      source:
+        runtimeSource === "desktop-bundle" && bundledRuntimeDir !== undefined
+          ? {
+              type: "bundled-directory" as const,
+              directory: bundledRuntimeDir,
+            }
+          : { type: "registry" as const },
       fs,
       path,
       runner,
@@ -253,6 +390,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
           .run({
             command: host.execPath,
             args: [runtime.entryPath, "--version"],
+            ...(Object.keys(serviceEnvironment).length === 0 ? {} : { env: serviceEnvironment }),
             timeout: Duration.seconds(30),
           })
           .pipe(
@@ -297,24 +435,23 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     const installed = yield* fs
       .exists(unitPath)
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
-    if (installed) {
-      yield* runStep("stopping the installed service", "systemctl", [
-        "--user",
-        "stop",
-        BOOT_SERVICE_UNIT_FILE,
-      ]);
+    const previousStateText = installed
+      ? yield* fs.readFileString(statePath).pipe(Effect.option)
+      : Option.none<string>();
+    if (Option.isSome(previousStateText) && serviceStateHasPendingUpdate(previousStateText.value)) {
+      return yield* new BootServiceUpdatePendingError();
+    }
+    const previousState = Option.isSome(previousStateText)
+      ? parseServiceState(previousStateText.value)
+      : undefined;
+    const desktopBootstrapToken =
+      previousState?.desktopBootstrapToken ?? Encoding.encodeHex(yield* crypto.randomBytes(24));
+    const wasRunning = installed && (isLinux || (yield* isLaunchAgentLoaded()));
+    if (wasRunning) {
+      yield* stopService();
     }
 
     yield* Effect.gen(function* () {
-      if (installed) {
-        const previousStateText = yield* fs.readFileString(statePath).pipe(Effect.option);
-        if (
-          Option.isSome(previousStateText) &&
-          serviceStateHasPendingUpdate(previousStateText.value)
-        ) {
-          return yield* new BootServiceUpdatePendingError();
-        }
-      }
       yield* fs
         .makeDirectory(unitDir, { recursive: true })
         .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
@@ -326,63 +463,70 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
           {
             protocol: SERVICE_LAUNCHER_PROTOCOL,
             activeVersion: input.cliVersion,
+            runtimeSource,
+            desktopBootstrapToken,
           } satisfies ServiceState,
           null,
           2,
         )}\n`,
       );
-      yield* writeDurably(unitPath, renderBootServiceUnit(plan));
+      yield* writeDurably(unitPath, renderServiceDefinition());
 
-      yield* runStep("reloading systemd user units", "systemctl", ["--user", "daemon-reload"]);
-      yield* runStep("enabling the service", "systemctl", [
-        "--user",
-        "enable",
-        BOOT_SERVICE_UNIT_FILE,
-      ]);
-      yield* runStep("enabling lingering for this user", "loginctl", ["enable-linger"]);
+      if (isLinux) {
+        yield* runStep("reloading systemd user units", "systemctl", ["--user", "daemon-reload"]);
+        yield* runStep("enabling the service", "systemctl", [
+          "--user",
+          "enable",
+          BOOT_SERVICE_UNIT_FILE,
+        ]);
+        yield* runStep("enabling lingering for this user", "loginctl", ["enable-linger"]);
+      }
       // Start last. No administrative state write occurs after this succeeds.
-      yield* runStep("starting the service", "systemctl", [
-        "--user",
-        "restart",
-        BOOT_SERVICE_UNIT_FILE,
-      ]);
+      yield* startService("starting the service");
     }).pipe(
       Effect.tapError(() =>
-        installed
-          ? runStep("restarting the service after a failed update", "systemctl", [
-              "--user",
-              "restart",
-              BOOT_SERVICE_UNIT_FILE,
-            ]).pipe(Effect.ignore)
+        wasRunning
+          ? startService("restarting the service after a failed update").pipe(Effect.ignore)
           : Effect.void,
       ),
     );
     return plan;
-  }).pipe(Effect.withSpan("cloud.boot_service.install"));
+  }).pipe(
+    Effect.mapError((error) =>
+      error._tag === "PlatformError" ? new BootServiceInstallError({ cause: error }) : error,
+    ),
+    Effect.withSpan("cloud.boot_service.install"),
+  );
 
   const uninstall: BootService["Service"]["uninstall"] = Effect.gen(function* () {
-    yield* requireSystemdLinux;
+    yield* requireSupportedPlatform;
     if (
       !(yield* fs
         .exists(unitPath)
         .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause }))))
     )
       return false;
-    yield* runStep("stopping the service", "systemctl", [
-      "--user",
-      "disable",
-      "--now",
-      BOOT_SERVICE_UNIT_FILE,
-    ]);
+    if (isLinux) {
+      yield* runStep("stopping the service", "systemctl", [
+        "--user",
+        "disable",
+        "--now",
+        BOOT_SERVICE_UNIT_FILE,
+      ]);
+    } else if (yield* isLaunchAgentLoaded()) {
+      yield* runStep("stopping the service", "launchctl", ["bootout", launchdDomain, unitPath]);
+    }
     yield* fs
       .remove(unitPath)
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
-    yield* runStep("reloading systemd user units", "systemctl", ["--user", "daemon-reload"]);
+    if (isLinux) {
+      yield* runStep("reloading systemd user units", "systemctl", ["--user", "daemon-reload"]);
+    }
     return true;
   }).pipe(Effect.withSpan("cloud.boot_service.uninstall"));
 
   const status: BootService["Service"]["status"] = Effect.gen(function* () {
-    if (platform !== "linux" || homeDir === "") {
+    if ((!isLinux && !isMac) || homeDir === "" || (isMac && uid === undefined)) {
       return { supported: false, installed: false, current: false, unitPath, logPath };
     }
     if (!(yield* fs.exists(unitPath))) {
@@ -397,22 +541,27 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
         fs.readFileString(statePath).pipe(Effect.option),
       ]);
     const state = Option.isSome(stateText) ? parseServiceState(stateText.value) : undefined;
+    const serviceLoaded = isLinux || (yield* isLaunchAgentLoaded());
     return {
       supported: true,
       installed: true,
       current:
-        unit === renderBootServiceUnit(plan) &&
+        serviceLoaded &&
+        unit === renderServiceDefinition() &&
         launcherExists &&
         runtimeEntryExists &&
         Option.isSome(runtimeSentinel) &&
         runtimeSentinel.value.trim() === input.cliVersion &&
         state?.activeVersion === input.cliVersion &&
+        state.runtimeSource === runtimeSource &&
         state?.update?.status !== "pending",
       unitPath,
       logPath,
     };
   }).pipe(
-    Effect.mapError((cause) => new BootServiceInstallError({ cause })),
+    Effect.mapError((cause) =>
+      cause._tag === "BootServiceCommandError" ? cause : new BootServiceInstallError({ cause }),
+    ),
     Effect.withSpan("cloud.boot_service.status"),
   );
 
@@ -423,5 +572,8 @@ export const layer = (input: {
   readonly baseDir: string;
   readonly logsDir: string;
   readonly cliVersion: string;
+  readonly runtimeSource?: ServiceRuntimeSource;
+  readonly bundledRuntimeDir?: string;
+  readonly serviceEnvironment?: Readonly<Record<string, string>>;
   readonly host?: BootServiceHost;
 }) => Layer.effect(BootService, make(input));

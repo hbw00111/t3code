@@ -17,6 +17,7 @@ import * as ServerSelfUpdate from "./selfUpdate.ts";
 interface HarnessOptions {
   readonly mode?: "web" | "desktop";
   readonly managed?: boolean;
+  readonly runtimeSource?: "registry" | "desktop-bundle";
   readonly preflight?: "ready" | "blocked";
   readonly requestUpdate?: ServiceLauncherClient.ServiceLauncherClient["Service"]["requestUpdate"];
 }
@@ -69,6 +70,7 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
   });
   const launcher = ServiceLauncherClient.ServiceLauncherClient.of({
     managed: options.managed ?? true,
+    runtimeSource: options.runtimeSource ?? "registry",
     requestUpdate:
       options.requestUpdate ??
       (() =>
@@ -112,6 +114,10 @@ it.layer(NodeServices.layer)("server self update", (it) => {
       const desktop = yield* makeHarness({ mode: "desktop" });
       expect(
         (yield* desktop.selfUpdate.update({ targetVersion: "1.1.0" }).pipe(Effect.flip)).reason,
+      ).toContain("desktop app");
+      const bundled = yield* makeHarness({ runtimeSource: "desktop-bundle" });
+      expect(
+        (yield* bundled.selfUpdate.update({ targetVersion: "1.1.0" }).pipe(Effect.flip)).reason,
       ).toContain("desktop app");
       expect([...web.order, ...desktop.order]).toEqual([]);
     }),

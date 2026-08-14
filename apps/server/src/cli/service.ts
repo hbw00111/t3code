@@ -3,6 +3,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Terminal from "effect/Terminal";
 import { Command, GlobalFlag, Prompt } from "effect/unstable/cli";
+import { DESKTOP_SERVICE_BUNDLED_RUNTIME_ENV } from "@t3tools/contracts";
+import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
@@ -11,11 +13,24 @@ import * as ProcessRunner from "../processRunner.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 
 export const bootServiceLayer = (config: ServerConfig.ServerConfig["Service"]) =>
-  BootService.layer({
-    baseDir: config.baseDir,
-    logsDir: config.logsDir,
-    cliVersion: packageJson.version,
-  }).pipe(Layer.provide(ProcessRunner.layer));
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const environment = yield* HostProcessEnvironment;
+      const bundledRuntimeDir = environment[DESKTOP_SERVICE_BUNDLED_RUNTIME_ENV]?.trim();
+      return BootService.layer({
+        baseDir: config.baseDir,
+        logsDir: config.logsDir,
+        cliVersion: packageJson.version,
+        ...(bundledRuntimeDir
+          ? {
+              runtimeSource: "desktop-bundle" as const,
+              bundledRuntimeDir,
+              serviceEnvironment: { ELECTRON_RUN_AS_NODE: "1" },
+            }
+          : {}),
+      });
+    }),
+  ).pipe(Layer.provide(ProcessRunner.layer));
 
 export type ServiceReconcileResult =
   | {
@@ -48,7 +63,7 @@ export function formatServiceStatus(
   cliVersion: string,
 ): string {
   if (!status.supported) {
-    return "T3 Code service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd";
+    return "T3 Code service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd or macOS with launchd";
   }
   if (!status.installed) {
     return "T3 Code service\n  Status: not installed\n  Next: Run `t3 service install`.";

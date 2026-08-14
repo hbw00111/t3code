@@ -60,6 +60,7 @@ it.effect("waits for the launcher to durably commit the trial update ID", () =>
     const host = new FakeLauncherProcess({
       protocol: SERVICE_LAUNCHER_PROTOCOL,
       childVersion: "1.1.0",
+      runtimeSource: "registry",
       update: pending,
     });
     const client = yield* makeClient(host, "1.1.0");
@@ -83,8 +84,10 @@ it.effect("returns the launcher-generated ID only after update acceptance", () =
     const host = new FakeLauncherProcess({
       protocol: SERVICE_LAUNCHER_PROTOCOL,
       childVersion: "1.0.0",
+      runtimeSource: "registry",
     });
     const client = yield* makeClient(host, "1.0.0");
+    expect(client.runtimeSource).toBe("registry");
     const requested = yield* Effect.forkChild(
       client.requestUpdate({ targetVersion: "1.1.0", dbPath: "/tmp/state.sqlite" }),
       { startImmediately: true },
@@ -103,6 +106,7 @@ it.effect("preserves a launcher rejection as a distinct error", () =>
     const host = new FakeLauncherProcess({
       protocol: SERVICE_LAUNCHER_PROTOCOL,
       childVersion: "1.0.0",
+      runtimeSource: "registry",
     });
     const client = yield* makeClient(host, "1.0.0");
     const requested = yield* Effect.forkChild(
@@ -124,6 +128,7 @@ it.effect("rejects contradictory trial context instead of leaving activation clo
     const host = new FakeLauncherProcess({
       protocol: SERVICE_LAUNCHER_PROTOCOL,
       childVersion: "1.1.0",
+      runtimeSource: "registry",
       update: {
         id: "update-1",
         fromVersion: "1.0.0",

@@ -128,7 +128,7 @@ export const make = Effect.gen(function* () {
   const label = yield* resolveServerEnvironmentLabel({ cwdBaseName });
   const launcher = yield* resolveServiceLauncherMode();
   const serverSelfUpdate = resolveServerSelfUpdateCapability({
-    desktopManaged: serverConfig.mode === "desktop",
+    desktopManaged: serverConfig.mode === "desktop" || launcher.runtimeSource === "desktop-bundle",
     launcherManaged: launcher.managed,
   });
 

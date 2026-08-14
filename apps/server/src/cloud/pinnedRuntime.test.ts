@@ -65,6 +65,57 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
     }),
   );
 
+  it.effect("copies a bundled runtime without invoking npm", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pinned-runtime-bundle-" });
+      const bundledDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-runtime-bundle-" });
+      const bundledEntry = path.join(bundledDir, "node_modules", "t3", "dist", "bin.mjs");
+      yield* fs.makeDirectory(path.dirname(bundledEntry), { recursive: true });
+      yield* fs.writeFileString(bundledEntry, "export {}\n");
+      let runnerInvoked = false;
+
+      const installed = yield* ensurePinnedRuntimeInstalled({
+        baseDir,
+        version: "1.2.3",
+        source: { type: "bundled-directory", directory: bundledDir },
+        fs,
+        path,
+        runner: ProcessRunner.ProcessRunner.of({
+          run: () =>
+            Effect.sync(() => {
+              runnerInvoked = true;
+              return {
+                stdout: "",
+                stderr: "",
+                code: ChildProcessSpawner.ExitCode(1),
+                timedOut: false,
+                stdoutTruncated: false,
+                stderrTruncated: false,
+              };
+            }),
+        }),
+        validate: (staging) =>
+          fs.exists(staging.entryPath).pipe(
+            Effect.mapError(
+              (cause) =>
+                new PinnedRuntimeInstallError({ step: "checking the bundled runtime", cause }),
+            ),
+            Effect.flatMap((exists) =>
+              exists
+                ? Effect.void
+                : Effect.fail(new PinnedRuntimeInstallError({ step: "validating bundle" })),
+            ),
+          ),
+      });
+
+      assert.isFalse(runnerInvoked);
+      assert.equal(yield* fs.readFileString(installed.entryPath), "export {}\n");
+      assert.equal(yield* fs.readFileString(installed.sentinelPath), "1.2.3\n");
+    }),
+  );
+
   it.effect("removes staging and leaves no final runtime when validation fails", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

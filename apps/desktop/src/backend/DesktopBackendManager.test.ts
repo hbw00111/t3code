@@ -182,6 +182,35 @@ function makeTestInstance(input: MakeInstanceInput) {
 }
 
 describe("DesktopBackendManager", () => {
+  it.effect("attaches to an externally managed backend without spawning or terminating it", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const ready = yield* Deferred.make<void>();
+        const shutdownCount = yield* Ref.make(0);
+        const instance = yield* makeTestInstance({
+          config: { ...baseConfig, lifecycle: "attached" },
+          spawnerLayer: Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() => Effect.die("unexpected backend spawn")),
+          ),
+          onReady: Deferred.succeed(ready, undefined).pipe(Effect.asVoid),
+          onShutdown: Ref.update(shutdownCount, (count) => count + 1),
+        });
+
+        yield* instance.start;
+        yield* Deferred.await(ready);
+        const running = yield* instance.snapshot;
+        assert.isTrue(running.ready);
+        assert.isTrue(Option.isNone(running.activePid));
+
+        yield* instance.stop();
+        const stopped = yield* instance.snapshot;
+        assert.isFalse(stopped.desiredRunning);
+        assert.strictEqual(yield* Ref.get(shutdownCount), 1);
+      }),
+    ),
+  );
+
   it.effect("spawns the backend with fd3 bootstrap and fd4 telemetry", () =>
     Effect.scoped(
       Effect.gen(function* () {

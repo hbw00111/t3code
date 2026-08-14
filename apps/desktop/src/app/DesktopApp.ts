@@ -15,6 +15,7 @@ import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
+import * as DesktopBackgroundService from "../backend/DesktopBackgroundService.ts";
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLifecycle from "./DesktopLifecycle.ts";
@@ -142,6 +143,7 @@ const fatalStartupCause = <E>(stage: string, cause: Cause.Cause<E>) =>
 const bootstrap = Effect.gen(function* () {
   const pool = yield* DesktopBackendPool.DesktopBackendPool;
   const primaryBackend = yield* pool.primary;
+  const backgroundService = yield* DesktopBackgroundService.DesktopBackgroundService;
   const state = yield* DesktopState.DesktopState;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
@@ -154,12 +156,24 @@ const bootstrap = Effect.gen(function* () {
     return yield* new DesktopDevelopmentBackendPortRequiredError();
   }
 
-  const backendPortSelection = yield* resolveDesktopBackendPort(environment.configuredBackendPort);
+  const preparedBackgroundService = yield* backgroundService.prepare;
+  const backendPortSelection = Option.isSome(preparedBackgroundService)
+    ? {
+        port: preparedBackgroundService.value.port,
+        selectedByScan: false,
+        source: "background-service" as const,
+      }
+    : {
+        ...(yield* resolveDesktopBackendPort(environment.configuredBackendPort)),
+        source: "embedded-backend" as const,
+      };
   const backendPort = backendPortSelection.port;
   yield* logBootstrapInfo(
-    backendPortSelection.selectedByScan
-      ? "selected backend port via sequential scan"
-      : "using configured backend port",
+    backendPortSelection.source === "background-service"
+      ? "using background service endpoint"
+      : backendPortSelection.selectedByScan
+        ? "selected backend port via sequential scan"
+        : "using configured backend port",
     {
       port: backendPort,
       ...(backendPortSelection.selectedByScan ? { startPort: DEFAULT_DESKTOP_BACKEND_PORT } : {}),

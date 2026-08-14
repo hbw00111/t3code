@@ -111,13 +111,16 @@ const testDescriptor = {
   capabilities: { repositoryIdentity: true },
 };
 
-const withDescriptorServer = <A, E, R>(run: (origin: string) => Effect.Effect<A, E, R>) =>
+const withEnvironmentDescriptorServer = <A, E, R>(
+  descriptor: typeof testDescriptor,
+  run: (origin: string) => Effect.Effect<A, E, R>,
+) =>
   Effect.acquireUseRelease(
     Effect.callback<NodeHttp.Server>((resume) => {
       const server = NodeHttp.createServer((request, response) => {
         if (request.url === "/.well-known/t3/environment") {
           response.writeHead(200, { "content-type": "application/json" });
-          response.end(JSON.stringify(testDescriptor));
+          response.end(JSON.stringify(descriptor));
           return;
         }
         response.writeHead(404);
@@ -134,6 +137,9 @@ const withDescriptorServer = <A, E, R>(run: (origin: string) => Effect.Effect<A,
     },
     (server) => Effect.sync(() => server.close()),
   );
+
+const withDescriptorServer = <A, E, R>(run: (origin: string) => Effect.Effect<A, E, R>) =>
+  withEnvironmentDescriptorServer(testDescriptor, run);
 
 describe("t3 pair", () => {
   it.effect("mints a token and prints a QR pairing URL for a live server", () =>
@@ -170,6 +176,64 @@ describe("t3 pair", () => {
         assert.equal(credentials.length, 1);
         assert.equal(credentials[0]?.label, "t3 pair");
       }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("pairs through a verified public URL", () =>
+    withDescriptorServer((localOrigin) =>
+      withDescriptorServer((publicOrigin) =>
+        Effect.gen(function* () {
+          const baseDir = NodeFS.mkdtempSync(
+            NodePath.join(NodeOS.tmpdir(), "t3-pair-public-url-test-"),
+          );
+          const statePath = NodePath.join(baseDir, "userdata", "server-runtime.json");
+          yield* persistServerRuntimeState({
+            path: statePath,
+            state: yield* makePersistedServerRuntimeState({
+              config: { host: "127.0.0.1", devUrl: undefined },
+              port: Number(new URL(localOrigin).port),
+            }),
+          });
+
+          const output = yield* captureStdout(
+            runCli(["pair", "--base-dir", baseDir, "--url", publicOrigin]),
+          );
+
+          assert.include(output, `Pairing with pair-test (${localOrigin})`);
+          assert.include(output, `Pairing URL: ${publicOrigin}/pair#token=`);
+          assert.notInclude(output, "only reachable from this machine");
+        }),
+      ),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects a public URL for a different environment", () =>
+    withDescriptorServer((localOrigin) =>
+      withEnvironmentDescriptorServer(
+        { ...testDescriptor, environmentId: "different-environment" },
+        (publicOrigin) =>
+          Effect.gen(function* () {
+            const baseDir = NodeFS.mkdtempSync(
+              NodePath.join(NodeOS.tmpdir(), "t3-pair-public-url-mismatch-test-"),
+            );
+            const statePath = NodePath.join(baseDir, "userdata", "server-runtime.json");
+            yield* persistServerRuntimeState({
+              path: statePath,
+              state: yield* makePersistedServerRuntimeState({
+                config: { host: "127.0.0.1", devUrl: undefined },
+                port: Number(new URL(localOrigin).port),
+              }),
+            });
+
+            const error = yield* provideCliTestLayers(
+              runCli(["pair", "--base-dir", baseDir, "--url", publicOrigin]).pipe(Effect.flip),
+            );
+            const rendered = String(
+              typeof error === "object" && error !== null && "cause" in error ? error.cause : error,
+            );
+            assert.include(rendered, "points to a different T3 Code environment");
+          }),
+      ),
     ).pipe(Effect.provide(NodeServices.layer)),
   );
 

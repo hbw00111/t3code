@@ -10,6 +10,7 @@ export const runServerCommand = (
   options?: {
     readonly startupPresentation?: StartupPresentation;
     readonly forceAutoBootstrapProjectFromCwd?: boolean;
+    readonly serviceManaged?: boolean;
   },
 ) =>
   Effect.gen(function* () {
@@ -31,6 +32,19 @@ export const serveCommand = Command.make("serve", { ...sharedServerCommandFlags 
     runServerCommand(flags, {
       startupPresentation: "headless",
       forceAutoBootstrapProjectFromCwd: false,
+    }),
+  ),
+);
+
+export const serviceServeCommand = Command.make("__service-serve", {
+  ...sharedServerCommandFlags,
+}).pipe(
+  Command.withHidden,
+  Command.withHandler((flags) =>
+    runServerCommand(flags, {
+      startupPresentation: "headless",
+      forceAutoBootstrapProjectFromCwd: false,
+      serviceManaged: true,
     }),
   ),
 );

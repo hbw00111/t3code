@@ -25,6 +25,7 @@
 
 import * as Brand from "effect/Brand";
 import * as Cause from "effect/Cause";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -87,6 +88,9 @@ export interface BackendProcessContext {
 export type DesktopBackendBootstrapDelivery = "fd3" | "stdin";
 
 export interface DesktopBackendStartConfig extends BackendProcessContext {
+  /** Omitted for the normal child-process lifecycle. Attached backends are
+      readiness-checked but remain owned by their external service manager. */
+  readonly lifecycle?: "attached";
   readonly args: ReadonlyArray<string>;
   readonly env: Record<string, string | undefined>;
   // When true the spawner merges the desktop process.env on top of `env`;
@@ -888,59 +892,86 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
           );
         });
 
-        const program = runBackendProcess({
-          ...config.value,
-          desktopTelemetryStream: desktopTelemetryPublisher.encoded,
-          onDesktopTelemetryControl: (message) =>
-            desktopTelemetryPublisher.handleControlForSource(spec.id, message),
-          onStarted: Effect.fn("desktop.backendInstance.onStarted")(function* (pid) {
-            yield* updateActiveRun(runId, (run) => ({
-              ...run,
-              pid: Option.some(pid),
-            }));
-            yield* backendOutputLog.beginSession({
-              details: `pid=${pid} port=${config.value.bootstrap.port} cwd=${config.value.cwd}`,
-            });
-          }),
-          onExitObserved: () =>
-            updateActiveRun(runId, (run) => ({
-              ...run,
-              exitObserved: true,
-            })),
-          onReady: Effect.fn("desktop.backendInstance.onReady")(function* () {
-            const isCurrentRun = yield* Ref.modify(state, (latest) => {
-              const activeRun = Option.getOrUndefined(latest.active);
-              if (activeRun?.id !== runId) {
-                return [false, latest] as const;
-              }
-
-              return [
-                true,
-                {
-                  ...latest,
-                  restartAttempt: 0,
-                  ready: true,
-                },
-              ] as const;
-            });
-            if (!isCurrentRun) {
-              return;
+        const handleReady = Effect.fn("desktop.backendInstance.onReady")(function* () {
+          const isCurrentRun = yield* Ref.modify(state, (latest) => {
+            const activeRun = Option.getOrUndefined(latest.active);
+            if (activeRun?.id !== runId) {
+              return [false, latest] as const;
             }
 
-            yield* spec.onReady?.(config.value.httpBaseUrl) ?? Effect.void;
-          }),
-          onReadinessFailure: Effect.fn("desktop.backendInstance.onReadinessFailure")(
-            function* (error) {
-              yield* logInstanceWarning("backend readiness check failed during bootstrap", {
-                error: error.message,
+            return [
+              true,
+              {
+                ...latest,
+                restartAttempt: 0,
+                ready: true,
+              },
+            ] as const;
+          });
+          if (!isCurrentRun) {
+            return;
+          }
+
+          yield* spec.onReady?.(config.value.httpBaseUrl) ?? Effect.void;
+        });
+        const handleReadinessFailure = Effect.fn("desktop.backendInstance.onReadinessFailure")(
+          function* (error: BackendReadinessTimeoutError) {
+            yield* logInstanceWarning("backend readiness check failed during bootstrap", {
+              error: error.message,
+            });
+            yield* backendOutputLog.persistFailureSnapshot({
+              details: error.message,
+            });
+          },
+        );
+
+        const backendProgram: Effect.Effect<
+          BackendProcessExit,
+          BackendProcessError | BackendReadinessTimeoutError,
+          BackendProcessRunRequirements
+        > =
+          config.value.lifecycle === "attached"
+            ? Effect.gen(function* () {
+                const detached = yield* Deferred.make<void>();
+                yield* Effect.addFinalizer(() =>
+                  Deferred.succeed(detached, undefined).pipe(Effect.asVoid),
+                );
+                yield* waitForHttpReady({
+                  ...config.value,
+                  timeout: DEFAULT_BACKEND_READINESS_TIMEOUT,
+                }).pipe(Effect.tap(handleReady), Effect.tapError(handleReadinessFailure));
+                yield* Deferred.await(detached);
+                return {
+                  code: Option.none<number>(),
+                  reason: "attached backend detached",
+                } satisfies BackendProcessExit;
+              })
+            : runBackendProcess({
+                ...config.value,
+                desktopTelemetryStream: desktopTelemetryPublisher.encoded,
+                onDesktopTelemetryControl: (message) =>
+                  desktopTelemetryPublisher.handleControlForSource(spec.id, message),
+                onStarted: Effect.fn("desktop.backendInstance.onStarted")(function* (pid) {
+                  yield* updateActiveRun(runId, (run) => ({
+                    ...run,
+                    pid: Option.some(pid),
+                  }));
+                  yield* backendOutputLog.beginSession({
+                    details: `pid=${pid} port=${config.value.bootstrap.port} cwd=${config.value.cwd}`,
+                  });
+                }),
+                onExitObserved: () =>
+                  updateActiveRun(runId, (run) => ({
+                    ...run,
+                    exitObserved: true,
+                  })),
+                onReady: handleReady,
+                onReadinessFailure: handleReadinessFailure,
+                onOutput: (streamName, chunk) =>
+                  backendOutputLog.writeOutputChunk(streamName, chunk),
               });
-              yield* backendOutputLog.persistFailureSnapshot({
-                details: error.message,
-              });
-            },
-          ),
-          onOutput: (streamName, chunk) => backendOutputLog.writeOutputChunk(streamName, chunk),
-        }).pipe(
+
+        const program = backendProgram.pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           Effect.provideService(HttpClient.HttpClient, httpClient),
           Scope.provide(runScope),
