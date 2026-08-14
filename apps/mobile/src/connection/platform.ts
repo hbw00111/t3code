@@ -31,6 +31,7 @@ import { appAtomRegistry } from "../state/atom-registry";
 import { clearThreadOutboxEnvironment } from "../state/thread-outbox";
 import { clearComposerDraftsEnvironment } from "../state/use-composer-drafts";
 import { mobileApplicationActiveWakeup } from "./app-state-wakeups";
+import { mobileNetworkPathWakeups } from "./network-path-wakeups";
 import { connectionStorageLayer } from "./storage";
 
 function networkStatus(state: Network.NetworkState): "unknown" | "offline" | "online" {
@@ -97,7 +98,7 @@ const wakeupsLayer = Wakeups.layer({
               return;
             }
             if (state === "active") {
-              Queue.offerUnsafe(queue, mobileApplicationActiveWakeup(backgroundedAtMs, Date.now()));
+              Queue.offerUnsafe(queue, mobileApplicationActiveWakeup(backgroundedAtMs));
               backgroundedAtMs = null;
             }
           });
@@ -105,8 +106,11 @@ const wakeupsLayer = Wakeups.layer({
         (subscription) => Effect.sync(() => subscription.remove()),
       ).pipe(Effect.asVoid),
     ),
-    managedRelayAccountChanges(appAtomRegistry).pipe(
-      Stream.map(() => "credentials-changed" as const),
+    Stream.merge(
+      managedRelayAccountChanges(appAtomRegistry).pipe(
+        Stream.map(() => "credentials-changed" as const),
+      ),
+      mobileNetworkPathWakeups((listener) => Network.addNetworkStateListener(listener)),
     ),
   ),
 });

@@ -688,6 +688,31 @@ describe("EnvironmentSupervisor", () => {
     }).pipe(Effect.provide(TestClock.layer())),
   );
 
+  it.effect("restarts an in-flight attempt when the network path changes", () =>
+    Effect.gen(function* () {
+      const firstAttemptStarted = yield* Deferred.make<void>();
+      const harness = yield* makeHarness({
+        prepare: (attempt) =>
+          attempt === 1
+            ? Deferred.succeed(firstAttemptStarted, undefined).pipe(Effect.andThen(Effect.never))
+            : Effect.succeed(PREPARED_CONNECTION),
+      });
+      const supervisor = yield* EnvironmentSupervisor.make(TARGET_ENTRY, {
+        initiallyDesired: true,
+      }).pipe(Effect.provide(harness.dependencies));
+
+      yield* Deferred.await(firstAttemptStarted);
+      yield* harness.wake("network-path-changed");
+      yield* eventuallyState(
+        supervisor.state,
+        (state) => state.phase === "connected" && state.generation === 1 && state.attempt === 1,
+      );
+
+      expect(yield* Ref.get(harness.prepareCount)).toBe(2);
+      expect(yield* Ref.get(harness.sessionCount)).toBe(1);
+    }),
+  );
+
   it.effect("treats an involuntary session close as transient and reconnects", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();
@@ -1037,6 +1062,48 @@ describe("EnvironmentSupervisor", () => {
 
       expect(yield* Ref.get(harness.sessionCount)).toBe(2);
     }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("quickly replaces a stalled session when the network path changes", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        probe: (attempt) => (attempt === 1 ? Effect.never : Effect.void),
+      });
+      const supervisor = yield* EnvironmentSupervisor.make(TARGET_ENTRY, {
+        initiallyDesired: true,
+      }).pipe(Effect.provide(harness.dependencies));
+
+      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+      yield* harness.wake("network-path-changed");
+      yield* TestClock.adjust("3 seconds");
+      yield* eventuallyState(
+        supervisor.state,
+        (state) => state.phase === "connected" && state.generation === 2 && state.attempt === 1,
+      );
+
+      expect(yield* Ref.get(harness.sessionCount)).toBe(2);
+      expect(yield* Ref.get(harness.releaseCount)).toBe(1);
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("keeps a healthy session when the network path changes", () =>
+    Effect.gen(function* () {
+      const probeCalled = yield* Deferred.make<void>();
+      const harness = yield* makeHarness({
+        probe: () => Deferred.succeed(probeCalled, undefined),
+      });
+      const supervisor = yield* EnvironmentSupervisor.make(TARGET_ENTRY, {
+        initiallyDesired: true,
+      }).pipe(Effect.provide(harness.dependencies));
+
+      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+      yield* harness.wake("network-path-changed");
+      yield* Deferred.await(probeCalled);
+
+      expect(yield* Ref.get(harness.sessionCount)).toBe(1);
+      expect(yield* Ref.get(harness.releaseCount)).toBe(0);
+      expect((yield* SubscriptionRef.get(supervisor.state)).generation).toBe(1);
+    }),
   );
 
   it.effect("honors an explicit disconnect while a foreground probe is stalled", () =>

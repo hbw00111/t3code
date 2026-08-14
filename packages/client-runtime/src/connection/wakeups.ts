@@ -6,7 +6,8 @@ export type ConnectionWakeup =
   | "application-active"
   | "application-active-probe"
   | "application-active-reconnect"
-  | "credentials-changed";
+  | "credentials-changed"
+  | "network-path-changed";
 
 export function isApplicationActiveWakeup(reason: ConnectionWakeup): boolean {
   return (
@@ -14,6 +15,10 @@ export function isApplicationActiveWakeup(reason: ConnectionWakeup): boolean {
     reason === "application-active-probe" ||
     reason === "application-active-reconnect"
   );
+}
+
+export function shouldRetryImmediatelyAfterWakeup(reason: ConnectionWakeup): boolean {
+  return isApplicationActiveWakeup(reason) || reason === "network-path-changed";
 }
 
 export function shouldResubscribeAfterWakeup(reason: ConnectionWakeup): boolean {

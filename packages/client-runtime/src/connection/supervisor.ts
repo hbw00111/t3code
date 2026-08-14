@@ -232,9 +232,8 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
   const intent = yield* Ref.make(initialIntent);
   const signals = yield* Queue.unbounded<SupervisorSignal>();
   const resetRetryState = yield* Ref.make(false);
-  // Set when a foreground wake probe fails or times out: the user is actively
-  // returning to the app on a dead transport, so the follow-up reconnect skips
-  // the first backoff rung instead of sleeping.
+  // Set when a wake probe fails or times out. The transport is known to be
+  // stale, so the follow-up reconnect skips the first backoff rung.
   const wakeProbeFailed = yield* Ref.make(false);
   const state = yield* SubscriptionRef.make<SupervisorConnectionState>(
     !initialIntent.desired
@@ -381,7 +380,10 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
         case "ConnectRequested":
           break;
         case "Wakeup":
-          if (next.reason === "application-active-reconnect") {
+          if (
+            next.reason === "application-active-reconnect" ||
+            next.reason === "network-path-changed"
+          ) {
             return true;
           }
           if (next.reason === "credentials-changed" && target._tag === "RelayConnectionTarget") {
@@ -418,11 +420,16 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
             // replaces that lease and starts a fresh attempt without backoff.
             return true;
           }
-          if (next.reason === "application-active" || next.reason === "application-active-probe") {
+          if (
+            next.reason === "application-active" ||
+            next.reason === "application-active-probe" ||
+            next.reason === "network-path-changed"
+          ) {
             const probe = yield* lease.session.probe.pipe(
               Effect.timeoutOrElse({
                 duration:
-                  next.reason === "application-active-probe"
+                  next.reason === "application-active-probe" ||
+                  next.reason === "network-path-changed"
                     ? MOBILE_CONNECTION_PROBE_TIMEOUT
                     : CONNECTION_PROBE_TIMEOUT,
                 orElse: () =>
@@ -463,7 +470,10 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
                   }
                   break;
                 case "Wakeup":
-                  if (probeEvent.signal.reason === "application-active-reconnect") {
+                  if (
+                    probeEvent.signal.reason === "application-active-reconnect" ||
+                    probeEvent.signal.reason === "network-path-changed"
+                  ) {
                     yield* Fiber.interrupt(probe);
                     return true;
                   }
@@ -622,7 +632,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
           const next = yield* Queue.take(signals);
           switch (next._tag) {
             case "Wakeup":
-              return ConnectionWakeups.isApplicationActiveWakeup(next.reason);
+              return ConnectionWakeups.shouldRetryImmediatelyAfterWakeup(next.reason);
             case "ConnectRequested":
             case "DisconnectRequested":
             case "RetryRequested":
@@ -636,7 +646,8 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
 
   const waitForSignal = Queue.take(signals).pipe(
     Effect.map(
-      (next) => next._tag === "Wakeup" && ConnectionWakeups.isApplicationActiveWakeup(next.reason),
+      (next) =>
+        next._tag === "Wakeup" && ConnectionWakeups.shouldRetryImmediatelyAfterWakeup(next.reason),
     ),
   );
 
