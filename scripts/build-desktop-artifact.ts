@@ -1719,6 +1719,16 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       target: target === "dmg" ? [target, "zip"] : [target],
       icon: "icon.icns",
       category: "public.app-category.developer-tools",
+      ...(!signed
+        ? {
+            identity: "-",
+            hardenedRuntime: false,
+            // Squirrel verifies the next bundle against the current app's designated
+            // requirement. The default ad-hoc requirement pins one build's cdhash,
+            // which makes every later release fail after it has been downloaded.
+            requirements: "update-requirements.mac",
+          }
+        : {}),
       protocols: [
         {
           name: "T3 Code",
