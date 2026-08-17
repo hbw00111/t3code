@@ -2,6 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import type { DesktopBridge, DesktopUpdateState } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Queue from "effect/Queue";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
@@ -10,6 +11,8 @@ import { Atom } from "effect/unstable/reactivity";
 type DesktopUpdateBridge = Pick<DesktopBridge, "getUpdateState" | "onUpdateState">;
 
 const INITIAL_STATE_READ_ATTEMPT_COUNT = 3;
+const DESKTOP_BRIDGE_READ_ATTEMPT_COUNT = 40;
+const DESKTOP_STARTUP_RETRY_INTERVAL = "25 millis";
 
 export class DesktopUpdateStateReadError extends Schema.TaggedErrorClass<DesktopUpdateStateReadError>()(
   "DesktopUpdateStateReadError",
@@ -30,7 +33,13 @@ function getDesktopUpdateBridge(): DesktopUpdateBridge | undefined {
 export function createDesktopUpdateStateAtom(getBridge: () => DesktopUpdateBridge | undefined) {
   const updates = Stream.callback<DesktopUpdateState | null>((queue) =>
     Effect.gen(function* () {
-      const bridge = getBridge();
+      const bridge = yield* Effect.sync(getBridge).pipe(
+        Effect.repeat({
+          until: (candidate) => candidate !== undefined,
+          times: DESKTOP_BRIDGE_READ_ATTEMPT_COUNT - 1,
+          schedule: Schedule.spaced(DESKTOP_STARTUP_RETRY_INTERVAL),
+        }),
+      );
       if (!bridge) {
         Queue.offerUnsafe(queue, null);
         return yield* Effect.never;
@@ -55,7 +64,10 @@ export function createDesktopUpdateStateAtom(getBridge: () => DesktopUpdateBridg
             cause,
           }),
       }).pipe(
-        Effect.retry({ times: INITIAL_STATE_READ_ATTEMPT_COUNT - 1 }),
+        Effect.retry({
+          times: INITIAL_STATE_READ_ATTEMPT_COUNT - 1,
+          schedule: Schedule.spaced(DESKTOP_STARTUP_RETRY_INTERVAL),
+        }),
         Effect.catchTags({
           DesktopUpdateStateReadError: (error) =>
             Effect.logError(error.message, {

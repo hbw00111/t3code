@@ -28,6 +28,56 @@ afterEach(() => {
 });
 
 describe("desktopUpdateStateAtom", () => {
+  it("loads update state when the desktop bridge becomes available after mount", async () => {
+    let bridge:
+      | {
+          readonly getUpdateState: () => Promise<DesktopUpdateState>;
+          readonly onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
+        }
+      | undefined;
+    const getUpdateState = vi.fn(async () => baseState);
+    const atom = createDesktopUpdateStateAtom(() => bridge);
+    const registry = AtomRegistry.make();
+    registry.mount(atom);
+
+    bridge = {
+      getUpdateState,
+      onUpdateState: () => () => undefined,
+    };
+
+    await vi.waitFor(() => {
+      expect(AsyncResult.getOrElse(registry.get(atom), () => null)).toEqual(baseState);
+    });
+    expect(getUpdateState).toHaveBeenCalledOnce();
+    registry.dispose();
+  });
+
+  it("loads update state when desktop IPC becomes available during initial retries", async () => {
+    let ipcReady = false;
+    const getUpdateState = vi.fn(async () => {
+      if (!ipcReady) {
+        throw new Error("IPC handler not ready");
+      }
+      return baseState;
+    });
+    const atom = createDesktopUpdateStateAtom(() => ({
+      getUpdateState,
+      onUpdateState: () => () => undefined,
+    }));
+    const registry = AtomRegistry.make();
+    registry.mount(atom);
+
+    setTimeout(() => {
+      ipcReady = true;
+    }, 10);
+
+    await vi.waitFor(() => {
+      expect(AsyncResult.getOrElse(registry.get(atom), () => null)).toEqual(baseState);
+    });
+    expect(getUpdateState).toHaveBeenCalledTimes(2);
+    registry.dispose();
+  });
+
   it("loads once, retains state, and follows desktop update events", async () => {
     let listener: ((state: DesktopUpdateState) => void) | undefined;
     const unsubscribe = vi.fn();
