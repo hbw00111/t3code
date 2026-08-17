@@ -153,6 +153,7 @@ export interface CodexSessionRuntimeShape {
   readonly sendTurn: (
     input: CodexSessionRuntimeSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, CodexSessionRuntimeError>;
+  readonly compactThread: () => Effect.Effect<void, CodexSessionRuntimeError>;
   readonly getGoal: () => Effect.Effect<ThreadGoalSnapshot | null, CodexSessionRuntimeError>;
   readonly setGoal: (
     objective: string,
@@ -370,7 +371,7 @@ function buildCodexCollaborationMode(input: {
   const model = normalizeCodexModelSlug(input.model) ?? DEFAULT_MODEL;
   const reasoningEffort = input.effort ?? "medium";
   return {
-    mode: input.interactionMode,
+    mode: input.interactionMode === "plan" ? "plan" : "default",
     settings: {
       model,
       reasoning_effort: reasoningEffort,
@@ -477,6 +478,22 @@ interface CodexThreadOpenClient {
     payload: CodexRpc.ClientRequestParamsByMethod[M],
   ) => Effect.Effect<CodexRpc.ClientRequestResponsesByMethod[M], CodexErrors.CodexAppServerError>;
 }
+
+interface CodexThreadCompactClient {
+  readonly request: (
+    method: "thread/compact/start",
+    payload: CodexRpc.ClientRequestParamsByMethod["thread/compact/start"],
+  ) => Effect.Effect<
+    CodexRpc.ClientRequestResponsesByMethod["thread/compact/start"],
+    CodexErrors.CodexAppServerError
+  >;
+}
+
+export const compactCodexThread = (
+  client: CodexThreadCompactClient,
+  threadId: string,
+): Effect.Effect<void, CodexErrors.CodexAppServerError> =>
+  client.request("thread/compact/start", { threadId }).pipe(Effect.asVoid);
 
 export const openCodexThread = (input: {
   readonly client: CodexThreadOpenClient;
@@ -1850,6 +1867,11 @@ export const makeCodexSessionRuntime = (
               ? { resumeCursor: { threadId: resumedProviderThreadId } }
               : {}),
           } satisfies ProviderTurnStartResult;
+        }),
+      compactThread: () =>
+        Effect.gen(function* () {
+          const providerThreadId = yield* readProviderThreadId;
+          yield* compactCodexThread(client, providerThreadId);
         }),
       getGoal: () =>
         Effect.gen(function* () {

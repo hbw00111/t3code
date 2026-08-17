@@ -293,6 +293,15 @@ export function applyServerConfigProjection(
         latestEvent: event,
         source: "live",
       }));
+    case "selfHostedTunnelStatusUpdated":
+      return Option.map(current, (projection) => ({
+        config: {
+          ...projection.config,
+          selfHostedTunnelStatus: event.payload.status,
+        },
+        latestEvent: event,
+        source: "live",
+      }));
   }
 }
 
@@ -729,6 +738,14 @@ export function createServerEnvironmentAtoms<R, E>(
       concurrency: {
         mode: "singleFlight",
         key: ({ environmentId }) => environmentId,
+      },
+    }),
+    compactThread: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:provider:compact-thread",
+      tag: WS_METHODS.providerCompactThread,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) => `${environmentId}:${input.threadId}`,
       },
     }),
     updateProvider: createEnvironmentRpcCommand(runtime, {

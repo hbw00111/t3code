@@ -136,6 +136,18 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     },
   );
 
+  const compactThread = vi.fn(
+    (threadId: ThreadId): Effect.Effect<void, ProviderAdapterError> =>
+      sessions.has(threadId)
+        ? Effect.void
+        : Effect.fail(
+            new ProviderAdapterSessionNotFoundError({
+              provider,
+              threadId,
+            }),
+          ),
+  );
+
   const setThreadGoal = vi.fn(
     (_input: unknown): Effect.Effect<ProviderThreadGoalResult, ProviderAdapterError> =>
       Effect.succeed(null),
@@ -216,7 +228,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     },
     startSession,
     sendTurn,
-    ...(provider === CODEX_DRIVER ? { setThreadGoal } : {}),
+    ...(provider === CODEX_DRIVER ? { compactThread, setThreadGoal } : {}),
     interruptTurn,
     respondToRequest,
     respondToUserInput,
@@ -252,6 +264,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     updateSession,
     startSession,
     sendTurn,
+    compactThread,
     setThreadGoal,
     interruptTurn,
     respondToRequest,
@@ -885,6 +898,16 @@ routing.layer("ProviderServiceLive routing", (it) => {
       });
       assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
 
+      yield* provider.compactThread({ threadId: session.threadId });
+      assert.deepEqual(routing.codex.compactThread.mock.calls, [[session.threadId]]);
+      const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+      const compactedBinding = yield* directory.getBinding(session.threadId);
+      const binding = Option.getOrThrow(compactedBinding);
+      assert.equal(binding.status, "running");
+      const runtimePayload = binding.runtimePayload as Record<string, unknown>;
+      assert.equal(runtimePayload.activeTurnId, null);
+      assert.equal(runtimePayload.lastRuntimeEvent, "provider.compactThread");
+
       yield* provider.setThreadGoal({
         threadId: session.threadId,
         operation: "set",
@@ -985,6 +1008,27 @@ routing.layer("ProviderServiceLive routing", (it) => {
       assert.instanceOf(failure, ProviderUnsupportedError);
       assert.equal(failure.provider, "claudeAgent");
       assert.equal(routing.claude.setThreadGoal.mock.calls.length, 0);
+      routing.claude.startSession.mockClear();
+    }),
+  );
+
+  it.effect("reports unsupported compaction for providers without the capability", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-compact-unsupported");
+      yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make("claudeAgent"),
+        providerInstanceId: claudeAgentInstanceId,
+        threadId,
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
+      });
+
+      const failure = yield* Effect.flip(provider.compactThread({ threadId }));
+
+      assert.instanceOf(failure, ProviderUnsupportedError);
+      assert.equal(failure.provider, "claudeAgent");
+      assert.equal(routing.claude.compactThread.mock.calls.length, 0);
       routing.claude.startSession.mockClear();
     }),
   );

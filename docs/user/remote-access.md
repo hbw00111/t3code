@@ -45,8 +45,9 @@ That gives you:
 
 ## Enabling Network Access
 
-There are three ways to reach your server from another device: expose the desktop app's backend,
-run a headless server from the CLI, or have the desktop app launch T3 Code over SSH.
+There are four ways to reach your server from another device: expose the desktop app's backend,
+run a headless server from the CLI, have the desktop app launch T3 Code over SSH, or keep a reverse
+tunnel open through a server you operate.
 
 ### Option 1: Desktop App
 
@@ -177,6 +178,39 @@ nvm alias default 24
 With mise, asdf, fnm, or nodenv, make sure the tool's shim directory is installed and resolves to a Node version satisfying the range above without an interactive shell.
 
 If reconnecting after an app update fails, retry the SSH launch once. The launcher now compares its generated runner script, stops stale launcher-managed remote servers, clears the SSH launch PID/port state, and starts a fresh remote server. You should not normally need to delete `~/.t3/ssh-launch` or kill `t3` processes manually.
+
+### Option 4: Self-Hosted SSH Tunnel
+
+Use this when the T3 Code backend runs on your computer but phones and browsers should reach it
+through a stable HTTPS domain on your own server. The backend opens an outbound SSH connection, so
+the computer does not need an inbound public port.
+
+Create an SSH user on the server that accepts a key from the computer running T3 Code. The SSH
+server must allow TCP forwarding. Keep the forwarded port bound to loopback and let the server's
+HTTPS reverse proxy publish it. For example, a Caddy site for remote port `43883` is:
+
+```caddyfile
+t3.example.com {
+  reverse_proxy 127.0.0.1:43883
+}
+```
+
+Open **Settings** → **Connections** → **Self-hosted tunnel**. Set the SSH host and user, select the
+private key if it is not already resolved by SSH config, use `127.0.0.1` as the remote bind address,
+enter `43883` as the remote port, and set the public URL to `https://t3.example.com`.
+
+The connection status changes to the public URL when SSH is ready. That URL then appears in the
+pairing endpoint list and supplies both HTTPS and WSS addresses to new clients. The background
+service keeps the tunnel alive when the desktop window is closed, replaces it when settings change,
+and reconnects with bounded backoff after a network or SSH interruption.
+
+Confirm the public route before pairing another device:
+
+```bash
+curl https://t3.example.com/.well-known/t3/environment
+```
+
+Use a different remote port for every T3 Code computer routed through the same server.
 
 ## Updating a Remote Server
 

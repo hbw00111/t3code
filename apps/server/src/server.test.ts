@@ -113,6 +113,7 @@ import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSna
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
 import { PersistenceSqlError } from "./persistence/Errors.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
+import * as ProviderService from "./provider/Services/ProviderService.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "./provider/providerMaintenance.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
@@ -141,6 +142,7 @@ import * as SourceControlRepositoryService from "./sourceControl/SourceControlRe
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
+import * as SelfHostedTunnelRuntime from "./remoteAccess/SelfHostedTunnelRuntime.ts";
 import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
@@ -386,6 +388,7 @@ const buildAppUnderTest = (options?: {
   layers?: {
     keybindings?: Partial<Keybindings.Keybindings["Service"]>;
     providerRegistry?: Partial<ProviderRegistry.ProviderRegistry["Service"]>;
+    providerService?: Partial<ProviderService.ProviderService["Service"]>;
     serverSettings?: Partial<ServerSettings.ServerSettingsService["Service"]>;
     externalLauncher?: Partial<ExternalLauncher.ExternalLauncher["Service"]>;
     vcsDriver?: Partial<VcsDriver.VcsDriver["Service"]>;
@@ -414,6 +417,7 @@ const buildAppUnderTest = (options?: {
     cloudManagedEndpointRuntime?: Partial<
       CloudManagedEndpointRuntime.CloudManagedEndpointRuntime["Service"]
     >;
+    selfHostedTunnelRuntime?: Partial<SelfHostedTunnelRuntime.SelfHostedTunnelRuntimeShape>;
     relayClient?: Partial<RelayClient.RelayClient["Service"]>;
     cloudCliTokenManager?: Partial<CloudCliTokenManager.CloudCliTokenManager["Service"]>;
     nativeTelemetryClient?: Partial<NativeTelemetryClient.NativeTelemetryClient["Service"]>;
@@ -627,18 +631,24 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(ProviderRegistry.ProviderRegistry)({
-          getProviders: Effect.succeed([]),
-          refresh: () => Effect.succeed([]),
-          refreshInstance: () => Effect.succeed([]),
-          getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
-            Effect.succeed(
-              makeManualOnlyProviderMaintenanceCapabilities({ provider, packageName: null }),
-            ),
-          setProviderMaintenanceActionState: () => Effect.succeed([]),
-          streamChanges: Stream.empty,
-          ...options?.layers?.providerRegistry,
-        }),
+        Layer.mergeAll(
+          Layer.mock(ProviderRegistry.ProviderRegistry)({
+            getProviders: Effect.succeed([]),
+            refresh: () => Effect.succeed([]),
+            refreshInstance: () => Effect.succeed([]),
+            getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
+              Effect.succeed(
+                makeManualOnlyProviderMaintenanceCapabilities({ provider, packageName: null }),
+              ),
+            setProviderMaintenanceActionState: () => Effect.succeed([]),
+            streamChanges: Stream.empty,
+            ...options?.layers?.providerRegistry,
+          }),
+          Layer.mock(ProviderService.ProviderService)({
+            compactThread: () => Effect.void,
+            ...options?.layers?.providerService,
+          }),
+        ),
       ),
       Layer.provide(
         Layer.mock(ServerSettings.ServerSettingsService)({
@@ -923,6 +933,15 @@ const buildAppUnderTest = (options?: {
             ...options?.layers?.cloudManagedEndpointRuntime,
           }),
         ),
+      ),
+      Layer.provide(
+        Layer.succeed(SelfHostedTunnelRuntime.SelfHostedTunnelRuntime, {
+          getStatus: Effect.succeed({ state: "disabled" as const }),
+          streamChanges: Stream.empty,
+          subscribeChanges: Effect.succeed(Stream.empty),
+          applyConfig: () => Effect.void,
+          ...options?.layers?.selfHostedTunnelRuntime,
+        }),
       ),
       Layer.provide(
         Layer.succeed(
@@ -4584,6 +4603,30 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("routes provider context compaction through websocket RPC", () =>
+    Effect.gen(function* () {
+      const compactThread = vi.fn<ProviderService.ProviderService["Service"]["compactThread"]>(
+        () => Effect.void,
+      );
+      yield* buildAppUnderTest({
+        layers: {
+          providerService: { compactThread },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.providerCompactThread]({
+            threadId: ThreadId.make("thread-compact"),
+          }),
+        ),
+      );
+
+      assert.deepEqual(compactThread.mock.calls, [[{ threadId: ThreadId.make("thread-compact") }]]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("routes websocket resource telemetry through the subscription", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
@@ -4651,6 +4694,48 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         version: 1,
         type: "providerStatuses",
         payload: { providers: nextProviders },
+      });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes self-hosted tunnel status through the server config stream", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          keybindings: {
+            loadConfigState: Effect.succeed({ keybindings: [], issues: [] }),
+            streamChanges: Stream.empty,
+          },
+          providerRegistry: {
+            getProviders: Effect.succeed([]),
+            streamChanges: Stream.empty,
+          },
+          selfHostedTunnelRuntime: {
+            getStatus: Effect.succeed({ state: "connecting", attempt: 1 }),
+            subscribeChanges: Effect.succeed(Stream.succeed({ state: "connected", pid: 4312 })),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const events = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.subscribeServerConfig]({}).pipe(Stream.take(2), Stream.runCollect),
+        ),
+      );
+
+      const [first, second] = Array.from(events);
+      assert.equal(first?.type, "snapshot");
+      if (first?.type === "snapshot") {
+        assert.deepEqual(first.config.selfHostedTunnelStatus, {
+          state: "connecting",
+          attempt: 1,
+        });
+      }
+      assert.deepEqual(second, {
+        version: 1,
+        type: "selfHostedTunnelStatusUpdated",
+        payload: { status: { state: "connected", pid: 4312 } },
       });
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

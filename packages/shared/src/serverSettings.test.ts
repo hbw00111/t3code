@@ -63,6 +63,28 @@ describe("serverSettings helpers", () => {
     });
   });
 
+  it("deep merges partial self-hosted tunnel updates", () => {
+    const configured = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      selfHostedTunnel: {
+        sshHost: "relay.example.com",
+        remotePort: 43883,
+        publicBaseUrl: "https://t3.example.com",
+      },
+    });
+
+    expect(
+      applyServerSettingsPatch(configured, {
+        selfHostedTunnel: { enabled: true },
+      }).selfHostedTunnel,
+    ).toEqual({
+      ...DEFAULT_SERVER_SETTINGS.selfHostedTunnel,
+      enabled: true,
+      sshHost: "relay.example.com",
+      remotePort: 43883,
+      publicBaseUrl: "https://t3.example.com",
+    });
+  });
+
   it("replaces text generation selection when provider/model are provided", () => {
     const current = {
       ...DEFAULT_SERVER_SETTINGS,

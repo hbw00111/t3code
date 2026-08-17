@@ -8,6 +8,7 @@ import {
 } from "@t3tools/contracts";
 
 import {
+  currentThreadPlanStepOrdinal,
   estimateThreadLiveStatusHeight,
   findThreadGoalCommandReceipt,
   formatThreadGoalTime,
@@ -44,6 +45,45 @@ function activity(input: {
 }
 
 describe("mobile thread live status", () => {
+  it("reports the current step ordinal instead of the completed step count", () => {
+    expect(
+      currentThreadPlanStepOrdinal({
+        currentStep: "Inspect mobile",
+        completedSteps: 0,
+        totalSteps: 3,
+        steps: [
+          { step: "Inspect mobile", status: "pending" },
+          { step: "Test mobile", status: "pending" },
+          { step: "Ship mobile", status: "pending" },
+        ],
+      }),
+    ).toBe(1);
+    expect(
+      currentThreadPlanStepOrdinal({
+        currentStep: "Test mobile",
+        completedSteps: 1,
+        totalSteps: 3,
+        steps: [
+          { step: "Inspect mobile", status: "completed" },
+          { step: "Test mobile", status: "inProgress" },
+          { step: "Ship mobile", status: "pending" },
+        ],
+      }),
+    ).toBe(2);
+    expect(
+      currentThreadPlanStepOrdinal({
+        currentStep: "Ship mobile",
+        completedSteps: 3,
+        totalSteps: 3,
+        steps: [
+          { step: "Inspect mobile", status: "completed" },
+          { step: "Test mobile", status: "completed" },
+          { step: "Ship mobile", status: "completed" },
+        ],
+      }),
+    ).toBe(3);
+  });
+
   it("estimates the initial composer inset for every visible row", () => {
     const plan = {
       currentStep: "Test mobile",

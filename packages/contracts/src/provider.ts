@@ -97,6 +97,22 @@ export const ProviderStopSessionInput = Schema.Struct({
 });
 export type ProviderStopSessionInput = typeof ProviderStopSessionInput.Type;
 
+export const ProviderCompactThreadInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type ProviderCompactThreadInput = typeof ProviderCompactThreadInput.Type;
+
+export class ProviderCompactThreadError extends Schema.TaggedErrorClass<ProviderCompactThreadError>()(
+  "ProviderCompactThreadError",
+  {
+    detail: TrimmedNonEmptyString,
+  },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
 export const ProviderThreadGoalInput = Schema.Struct({
   threadId: ThreadId,
   operation: ThreadGoalOperation,

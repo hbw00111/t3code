@@ -19,7 +19,23 @@ import {
 } from "@t3tools/contracts";
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
-import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
+import {
+  BUILT_IN_COMPOSER_SLASH_COMMAND_DEFINITIONS,
+  buildAutomationPrompt,
+  buildReviewPrompt,
+  buildSubagentsPrompt,
+  type ComposerSlashInvocation,
+  parseComposerSlashInvocation,
+  parseFastSlashCommandAction,
+  shouldKeepProviderSlashCommand,
+} from "@t3tools/shared/composerSlashCommands";
+import {
+  buildProviderOptionSelectionsFromDescriptors,
+  createModelSelection,
+  getProviderOptionCurrentValue,
+  getProviderOptionDescriptors,
+  normalizeModelSlug,
+} from "@t3tools/shared/model";
 import {
   memo,
   type ReactNode,
@@ -196,6 +212,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import {
   BotIcon,
+  BugIcon,
   CircleAlertIcon,
   PencilRulerIcon,
   type LucideIcon,
@@ -206,7 +223,11 @@ import {
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
-import { getProviderDisplayName, getProviderInteractionModeToggle } from "../../providerModels";
+import {
+  getProviderDisplayName,
+  getProviderInteractionModeToggle,
+  getProviderModelCapabilities,
+} from "../../providerModels";
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
@@ -223,13 +244,13 @@ import type { PendingUserInputDraftAnswer } from "../../pendingUserInput";
 import type { PendingApproval, PendingUserInput } from "../../session-logic";
 import {
   deriveLatestContextWindowSnapshot,
+  formatContextWindowTokens,
   formatProviderDisplayName,
 } from "../../lib/contextWindow";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
-import { providerSupportsThreadGoals } from "../../threadGoalActivity";
 
 const runtimeModeOptions: RuntimeMode[] = [
   "approval-required",
@@ -318,7 +339,9 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   const interactionModeTooltip =
     props.interactionMode === "plan"
       ? props.t("chat.planModeExitTooltip")
-      : props.t("chat.defaultModeEnterPlanTooltip");
+      : props.interactionMode === "debug"
+        ? "Exit debug mode"
+        : props.t("chat.defaultModeEnterPlanTooltip");
 
   const interactionModeToggle = props.showInteractionModeToggle ? (
     <>
@@ -329,7 +352,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             <ComposerControl
               className={cn(
                 "shrink-0 whitespace-nowrap",
-                props.interactionMode === "plan"
+                props.interactionMode === "plan" || props.interactionMode === "debug"
                   ? "bg-accent text-accent-foreground hover:bg-accent/80"
                   : "text-secondary-label hover:text-foreground",
               )}
@@ -341,11 +364,17 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
         >
           {props.interactionMode === "plan" ? (
             <ComposerControlIcon icon={PencilRulerIcon} className="text-current opacity-100" />
+          ) : props.interactionMode === "debug" ? (
+            <ComposerControlIcon icon={BugIcon} className="text-current opacity-100" />
           ) : (
             <ComposerControlIcon icon={BotIcon} opticalSize="large" />
           )}
           <span className="sr-only sm:not-sr-only">
-            {props.interactionMode === "plan" ? props.t("chat.plan") : props.t("chat.build")}
+            {props.interactionMode === "plan"
+              ? props.t("chat.plan")
+              : props.interactionMode === "debug"
+                ? "Debug"
+                : props.t("chat.build")}
           </span>
         </TooltipTrigger>
         <TooltipPopup side="top">{interactionModeTooltip}</TooltipPopup>
@@ -608,6 +637,7 @@ export interface ChatComposerProps {
   toggleInteractionMode: () => void;
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
   handleInteractionModeChange: (mode: ProviderInteractionMode) => void;
+  onExecuteBuiltInSlashCommand: (invocation: ComposerSlashInvocation) => Promise<void> | void;
 
   focusComposer: () => void;
   scheduleComposerFocus: () => void;
@@ -682,6 +712,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     toggleInteractionMode,
     handleRuntimeModeChange,
     handleInteractionModeChange,
+    onExecuteBuiltInSlashCommand,
     focusComposer,
     scheduleComposerFocus,
     setThreadError,
@@ -702,6 +733,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
 
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
+  const setComposerDraftProviderModelOptions = useComposerDraftStore(
+    (store) => store.setProviderModelOptions,
+  );
   const addComposerDraftImage = useComposerDraftStore((store) => store.addImage);
   const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
   const removeComposerDraftImage = useComposerDraftStore((store) => store.removeImage);
@@ -1072,49 +1106,45 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }));
     }
     if (composerTrigger.kind === "slash-command") {
-      const builtInSlashCommandItems = [
-        {
-          id: "slash:model",
-          type: "slash-command",
-          command: "model",
-          label: "/model",
-          description: t("chat.chooseModel"),
-        },
-        ...(providerSupportsThreadGoals(selectedProvider)
-          ? ([
-              {
-                id: "slash:goal",
-                type: "slash-command",
-                command: "goal",
-                label: t("chat.goal"),
-                description: t("chat.setPersistentGoal"),
-              },
-            ] as const)
-          : []),
-        ...(getProviderInteractionModeToggle(providerStatuses, selectedProvider)
-          ? ([
-              {
-                id: "slash:plan",
-                type: "slash-command",
-                command: "plan",
-                label: t("chat.planMode"),
-                description: t("chat.togglePlanMode"),
-              },
-            ] as const)
-          : []),
-      ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
-      const providerSlashCommandItems = (selectedProviderStatus?.slashCommands ?? []).map(
-        (command) => ({
+      const builtInSlashCommandItems = BUILT_IN_COMPOSER_SLASH_COMMAND_DEFINITIONS.map(
+        (definition) => ({
+          id: `slash:${definition.command}`,
+          type: "slash-command" as const,
+          command: definition.command,
+          label: definition.title,
+          description: definition.description,
+        }),
+      );
+      const providerSlashCommandItems = (selectedProviderStatus?.slashCommands ?? [])
+        .filter((command) => shouldKeepProviderSlashCommand(command.name))
+        .map((command) => ({
           id: `provider-slash-command:${selectedProvider}:${command.name}`,
           type: "provider-slash-command" as const,
           provider: selectedProvider,
           command,
           label: `/${command.name}`,
           description: command.description ?? command.input?.hint ?? t("chat.runProviderCommand"),
-        }),
-      );
+        }));
+      const skillItems = searchProviderSkills(
+        selectedProviderStatus?.skills ?? [],
+        composerTrigger.query,
+      ).map((skill) => ({
+        id: `skill:${selectedProvider}:${skill.name}`,
+        type: "skill" as const,
+        provider: selectedProvider,
+        skill,
+        label: formatProviderSkillDisplayName(skill),
+        description:
+          skill.shortDescription ??
+          skill.description ??
+          (skill.scope ? `${skill.scope} ${t("chat.skill")}` : t("chat.runProviderSkill")),
+      }));
       const query = composerTrigger.query.trim().toLowerCase();
-      const slashCommandItems = [...builtInSlashCommandItems, ...providerSlashCommandItems];
+      const slashCommandItems = [
+        ...builtInSlashCommandItems,
+        ...providerSlashCommandItems,
+        ...skillItems,
+      ];
       if (!query) {
         return slashCommandItems;
       }
@@ -1696,6 +1726,171 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     };
   }, [detectUndismissedComposerTrigger, readComposerSnapshot]);
 
+  const setEntireComposerPrompt = useCallback(
+    (nextPrompt: string, options?: { focus?: boolean }) => {
+      const currentPrompt = promptRef.current;
+      return applyPromptReplacement(0, currentPrompt.length, nextPrompt, {
+        expectedText: currentPrompt,
+        focusEditorAfterReplace: options?.focus ?? true,
+      });
+    },
+    [applyPromptReplacement, promptRef],
+  );
+
+  const runFastSlashCommand = useCallback(
+    (text: string) => {
+      const action = parseFastSlashCommandAction(text);
+      if (action === null) return;
+
+      const caps = getProviderModelCapabilities(
+        selectedProviderModels,
+        selectedModel,
+        selectedProvider,
+      );
+      const descriptors = getProviderOptionDescriptors({
+        caps,
+        selections: selectedModelOptionsForDispatch,
+      });
+      const booleanDescriptor = descriptors.find(
+        (descriptor) => descriptor.id === "fastMode" && descriptor.type === "boolean",
+      );
+      const tierDescriptor = descriptors.find(
+        (
+          descriptor,
+        ): descriptor is Extract<(typeof descriptors)[number], { readonly type: "select" }> =>
+          descriptor.id === "serviceTier" && descriptor.type === "select",
+      );
+      const fastTier =
+        tierDescriptor?.options.find((option) =>
+          /(?:priority|fast)/i.test(`${option.id} ${option.label}`),
+        ) ?? null;
+      const normalTier =
+        tierDescriptor?.options.find((option) => option.isDefault) ??
+        tierDescriptor?.options.find((option) =>
+          /(?:default|standard|normal)/i.test(`${option.id} ${option.label}`),
+        ) ??
+        tierDescriptor?.options.find((option) => option.id !== fastTier?.id) ??
+        null;
+
+      if (!booleanDescriptor && (!tierDescriptor || !fastTier || !normalTier)) {
+        toastManager.add({
+          type: "warning",
+          title: "Fast mode is unavailable",
+          description: "The selected model does not expose a fast mode.",
+        });
+        return;
+      }
+      if (action === "invalid") {
+        toastManager.add({
+          type: "warning",
+          title: "Invalid /fast command",
+          description: "Use /fast, /fast on, /fast off, or /fast status.",
+        });
+        return;
+      }
+
+      const enabled = booleanDescriptor
+        ? getProviderOptionCurrentValue(booleanDescriptor) === true
+        : getProviderOptionCurrentValue(tierDescriptor) === fastTier?.id;
+      if (action === "status") {
+        toastManager.add({ type: "info", title: `Fast mode is ${enabled ? "on" : "off"}` });
+        return;
+      }
+
+      const nextEnabled = action === "on" ? true : action === "off" ? false : !enabled;
+      const nextDescriptors = descriptors.map((descriptor) => {
+        if (descriptor.id === booleanDescriptor?.id && descriptor.type === "boolean") {
+          return { ...descriptor, currentValue: nextEnabled };
+        }
+        if (descriptor.id === tierDescriptor?.id && descriptor.type === "select") {
+          return {
+            ...descriptor,
+            currentValue: nextEnabled ? fastTier!.id : normalTier!.id,
+          };
+        }
+        return descriptor;
+      });
+      setComposerDraftProviderModelOptions(
+        composerDraftTarget,
+        selectedProvider,
+        buildProviderOptionSelectionsFromDescriptors(nextDescriptors),
+        {
+          instanceId: selectedInstanceId,
+          model: selectedModel,
+          persistSticky: true,
+        },
+      );
+      toastManager.add({
+        type: "success",
+        title: `Fast mode ${nextEnabled ? "enabled" : "disabled"}`,
+      });
+    },
+    [
+      composerDraftTarget,
+      selectedInstanceId,
+      selectedModel,
+      selectedModelOptionsForDispatch,
+      selectedProvider,
+      selectedProviderModels,
+      setComposerDraftProviderModelOptions,
+    ],
+  );
+
+  const showSlashStatus = useCallback(() => {
+    const sessionStatus = activeThread?.session?.status ?? phase;
+    const contextDescription = activeContextWindow
+      ? `${formatContextWindowTokens(activeContextWindow.usedTokens)} of ${formatContextWindowTokens(activeContextWindow.maxTokens ?? null)} tokens used${
+          activeContextWindow.usedPercentage === null
+            ? ""
+            : ` (${Math.round(activeContextWindow.usedPercentage)}%)`
+        }.`
+      : "Context usage is not available yet.";
+    toastManager.add({
+      type: "info",
+      title: `Thread status: ${sessionStatus}`,
+      description: `${contextDescription} Mode: ${interactionMode}.`,
+    });
+  }, [activeContextWindow, activeThread?.session?.status, interactionMode, phase]);
+
+  const performImmediateSlashAction = useCallback(
+    (invocation: ComposerSlashInvocation): boolean => {
+      switch (invocation.command) {
+        case "model":
+          setIsComposerModelPickerOpen(true);
+          return true;
+        case "plan":
+        case "debug":
+        case "default":
+          void handleInteractionModeChange(invocation.command);
+          return true;
+        case "fast":
+          runFastSlashCommand(
+            `/${invocation.command}${invocation.args ? ` ${invocation.args}` : ""}`,
+          );
+          return true;
+        case "status":
+          showSlashStatus();
+          return true;
+        case "clear":
+        case "compact":
+        case "fork":
+        case "side":
+        case "export":
+        case "feedback":
+          void onExecuteBuiltInSlashCommand(invocation);
+          return true;
+        default:
+          return false;
+      }
+    },
+    [
+      handleInteractionModeChange,
+      onExecuteBuiltInSlashCommand,
+      runFastSlashCommand,
+      showSlashStatus,
+    ],
+  );
+
   const onSelectComposerItem = useCallback(
     (item: ComposerCommandItem) => {
       if (composerSelectLockRef.current) return;
@@ -1724,19 +1919,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return;
       }
       if (item.type === "slash-command") {
-        if (item.command === "model") {
-          const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
-            expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
-            focusEditorAfterReplace: false,
-          });
-          if (applied) {
-            setComposerHighlightedItemId(null);
-            setIsComposerModelPickerOpen(true);
-          }
-          return;
-        }
-        if (item.command === "goal") {
-          const replacement = "/goal ";
+        if (item.command === "goal" || item.command === "automation") {
+          const replacement = `/${item.command} `;
           const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
             snapshot.value,
             trigger.rangeEnd,
@@ -1753,12 +1937,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           }
           return;
         }
-        void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
-        const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+        const replacement =
+          item.command === "subagents"
+            ? buildSubagentsPrompt("")
+            : item.command === "review"
+              ? buildReviewPrompt("changes")
+              : "";
+        const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, replacement, {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+          focusEditorAfterReplace: item.command !== "model",
         });
         if (applied) {
           setComposerHighlightedItemId(null);
+          if (item.command === "review") {
+            void onSend();
+          } else if (item.command !== "subagents") {
+            performImmediateSlashAction({ command: item.command, args: "" });
+          }
         }
         return;
       }
@@ -1799,7 +1994,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return;
       }
     },
-    [applyPromptReplacement, handleInteractionModeChange, resolveActiveComposerTrigger],
+    [applyPromptReplacement, onSend, performImmediateSlashAction, resolveActiveComposerTrigger],
   );
 
   const onComposerMenuItemHighlighted = useCallback(
@@ -1872,6 +2067,41 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const submitComposer = useCallback(
     (event?: { preventDefault: () => void }) => {
+      const slashInvocation =
+        composerImages.length === 0 &&
+        composerTerminalContexts.length === 0 &&
+        composerElementContexts.length === 0 &&
+        composerPreviewAnnotations.length === 0 &&
+        composerReviewComments.length === 0
+          ? parseComposerSlashInvocation(promptRef.current)
+          : null;
+      if (slashInvocation) {
+        if (slashInvocation.command === "automation" && slashInvocation.args.length === 0) {
+          event?.preventDefault();
+          setEntireComposerPrompt("/automation ");
+          return;
+        }
+        if (slashInvocation.command === "subagents") {
+          setEntireComposerPrompt(buildSubagentsPrompt(slashInvocation.args), { focus: false });
+        } else if (slashInvocation.command === "review") {
+          setEntireComposerPrompt(
+            buildReviewPrompt(
+              /^(?:base|base-branch)(?:\s|$)/i.test(slashInvocation.args)
+                ? "base-branch"
+                : "changes",
+            ),
+            { focus: false },
+          );
+        } else if (slashInvocation.command === "automation") {
+          setEntireComposerPrompt(buildAutomationPrompt(slashInvocation.args), { focus: false });
+        } else if (slashInvocation.command !== "goal") {
+          event?.preventDefault();
+          if (setEntireComposerPrompt("", { focus: false })) {
+            performImmediateSlashAction(slashInvocation);
+          }
+          return;
+        }
+      }
       if (noProviderAvailable || isSendDisabled) {
         event?.preventDefault();
         return;
@@ -1897,9 +2127,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [
       activeThreadId,
       blurMobileComposerAfterSend,
+      composerElementContexts.length,
+      composerImages.length,
+      composerPreviewAnnotations.length,
+      composerReviewComments.length,
+      composerTerminalContexts.length,
       isSendDisabled,
       noProviderAvailable,
       onSend,
+      performImmediateSlashAction,
+      promptRef,
+      setEntireComposerPrompt,
       shouldBlurMobileComposerOnSubmit,
       t,
     ],

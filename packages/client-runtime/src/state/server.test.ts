@@ -282,6 +282,22 @@ describe("server state projection", () => {
     expect(result.latestEvent.type).toBe("settingsUpdated");
   });
 
+  it("projects self-hosted tunnel status updates without replacing other config", () => {
+    const snapshot = applyServerConfigProjection(Option.none(), snapshotEvent(CONFIG));
+    const projected = applyServerConfigProjection(snapshot, {
+      version: 1,
+      type: "selfHostedTunnelStatusUpdated",
+      payload: { status: { state: "connected", pid: 4312 } },
+    });
+
+    const result = Option.getOrThrow(projected);
+    expect(result.config).toEqual({
+      ...CONFIG,
+      selfHostedTunnelStatus: { state: "connected", pid: 4312 },
+    });
+    expect(result.latestEvent.type).toBe("selfHostedTunnelStatusUpdated");
+  });
+
   it("retains welcome when a ready event follows in the same stream chunk", () => {
     const welcome = {
       environment: {} as ServerLifecycleWelcomePayload["environment"],

@@ -15,6 +15,7 @@ import { AppText as Text, AppTextInput } from "../../components/AppText";
 import { SymbolView, type AppSymbolName } from "../../components/AppSymbol";
 import { useThemeColor } from "../../lib/useThemeColor";
 import {
+  currentThreadPlanStepOrdinal,
   formatThreadGoalTime,
   reduceGoalObjectiveEditor,
   threadGoalStatusLabel,
@@ -90,11 +91,7 @@ export function ThreadLiveStatusStrip(props: ThreadLiveStatusStripProps) {
 
   const planSteps = props.plan?.steps ?? [];
   const totalSteps = planSteps.length > 0 ? planSteps.length : (props.plan?.totalSteps ?? 0);
-  const completedSteps = props.plan
-    ? planSteps.length > 0
-      ? planSteps.filter((step) => step.status === "completed").length
-      : Math.max(0, Math.min(props.plan.completedSteps, props.plan.totalSteps))
-    : 0;
+  const currentStepOrdinal = props.plan ? currentThreadPlanStepOrdinal(props.plan) : 0;
   const canResume =
     props.goal?.status === "paused" ||
     props.goal?.status === "blocked" ||
@@ -172,7 +169,7 @@ export function ThreadLiveStatusStrip(props: ThreadLiveStatusStripProps) {
               {props.plan.currentStep}
             </Text>
             <Text className="font-mono text-2xs text-foreground-muted">
-              {completedSteps}/{totalSteps}
+              {currentStepOrdinal}/{totalSteps}
             </Text>
           </Pressable>
           {planExpanded ? (

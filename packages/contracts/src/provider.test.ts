@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 
 import {
   ProviderEvent,
+  ProviderCompactThreadInput,
   ProviderSendTurnInput,
   ProviderSession,
   ProviderSessionStartInput,
@@ -12,6 +13,7 @@ const decodeProviderSessionStartInput = Schema.decodeUnknownSync(ProviderSession
 const decodeProviderSendTurnInput = Schema.decodeUnknownSync(ProviderSendTurnInput);
 const decodeProviderSession = Schema.decodeUnknownSync(ProviderSession);
 const decodeProviderEvent = Schema.decodeUnknownSync(ProviderEvent);
+const decodeProviderCompactThreadInput = Schema.decodeUnknownSync(ProviderCompactThreadInput);
 
 function getOptionValue(
   options: ReadonlyArray<{ id: string; value: unknown }> | undefined,
@@ -150,6 +152,15 @@ describe("ProviderSendTurnInput", () => {
     expect(parsed.modelSelection?.instanceId).toBe("claudeAgent");
     expect(getOptionValue(parsed.modelSelection?.options, "effort")).toBe("ultrathink");
     expect(getOptionValue(parsed.modelSelection?.options, "fastMode")).toBe(true);
+  });
+});
+
+describe("ProviderCompactThreadInput", () => {
+  it("accepts only a valid thread id", () => {
+    expect(decodeProviderCompactThreadInput({ threadId: "thread-1" })).toEqual({
+      threadId: "thread-1",
+    });
+    expect(() => decodeProviderCompactThreadInput({ threadId: "" })).toThrow();
   });
 });
 

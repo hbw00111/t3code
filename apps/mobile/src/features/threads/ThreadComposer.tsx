@@ -384,6 +384,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         query: composerTrigger.query,
         providerDriver: selectedProviderStatus?.driver,
         providerCommands: selectedProviderStatus?.slashCommands ?? [],
+        providerSkills: selectedProviderStatus?.skills ?? [],
         showInteractionModeToggle: selectedProviderStatus?.showInteractionModeToggle ?? true,
       });
     }

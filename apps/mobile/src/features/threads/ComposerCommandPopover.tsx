@@ -111,6 +111,25 @@ function groupLabel(triggerKind: ComposerTriggerKind | null): string | null {
   }
 }
 
+function groupedItems(
+  items: ReadonlyArray<ComposerCommandItem>,
+  triggerKind: ComposerTriggerKind | null,
+): ReadonlyArray<{
+  readonly id: string;
+  readonly label: string | null;
+  readonly items: ComposerCommandItem[];
+}> {
+  if (triggerKind !== "slash-command") {
+    return [{ id: "default", label: groupLabel(triggerKind), items: [...items] }];
+  }
+  const commands = items.filter((item) => item.type !== "skill");
+  const skills = items.filter((item) => item.type === "skill");
+  return [
+    ...(commands.length > 0 ? [{ id: "commands", label: "Commands", items: commands }] : []),
+    ...(skills.length > 0 ? [{ id: "skills", label: "Skills", items: skills }] : []),
+  ];
+}
+
 function emptyText(triggerKind: ComposerTriggerKind | null, isLoading: boolean): string {
   if (isLoading) {
     return triggerKind === "path" ? "Searching files…" : "Loading…";
@@ -170,30 +189,41 @@ export const ComposerCommandPopover = memo(function ComposerCommandPopover(
   props: ComposerCommandPopoverProps,
 ) {
   const isDarkMode = useColorScheme() === "dark";
-  const label = groupLabel(props.triggerKind);
+  const groups = groupedItems(props.items, props.triggerKind);
 
   return (
     <PopoverSurface isDarkMode={isDarkMode}>
-      {label ? (
-        <View className="px-3.5 pt-2.5 pb-1">
-          <Text className="text-3xs font-t3-bold tracking-[0.8px] uppercase text-foreground-muted">
-            {label}
-          </Text>
-        </View>
-      ) : null}
       {props.items.length > 0 ? (
         <ScrollView
-          className="max-h-[180px]"
+          className="max-h-[320px]"
           keyboardShouldPersistTaps="always"
           showsVerticalScrollIndicator={false}
         >
-          {props.items.map((item, index) => (
-            <CommandRow
-              key={item.id}
-              item={item}
-              onPress={() => props.onSelect(item)}
-              isLast={index === props.items.length - 1}
-            />
+          {groups.map((group, groupIndex) => (
+            <View
+              key={group.id}
+              style={
+                groupIndex > 0
+                  ? { borderTopWidth: 0.5, borderTopColor: "rgba(255,255,255,0.12)" }
+                  : undefined
+              }
+            >
+              {group.label ? (
+                <View className="px-3.5 pt-2.5 pb-1">
+                  <Text className="text-3xs font-t3-bold tracking-[0.8px] uppercase text-foreground-muted">
+                    {group.label}
+                  </Text>
+                </View>
+              ) : null}
+              {group.items.map((item, index) => (
+                <CommandRow
+                  key={item.id}
+                  item={item}
+                  onPress={() => props.onSelect(item)}
+                  isLast={index === group.items.length - 1}
+                />
+              ))}
+            </View>
           ))}
         </ScrollView>
       ) : (

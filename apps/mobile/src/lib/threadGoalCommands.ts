@@ -3,10 +3,21 @@ import type {
   ProviderDriverKind,
   ProviderInstanceId,
   ServerProvider,
+  ServerProviderSkill,
   ServerProviderSlashCommand,
   ThreadId,
 } from "@t3tools/contracts";
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
+import {
+  BUILT_IN_COMPOSER_SLASH_COMMAND_DEFINITIONS,
+  type BuiltInComposerSlashCommand,
+  shouldKeepProviderSlashCommand,
+} from "@t3tools/shared/composerSlashCommands";
+import {
+  insertRankedSearchResult,
+  normalizeSearchQuery,
+  scoreQueryMatch,
+} from "@t3tools/shared/searchRanking";
 
 export type ComposerGoalCommand =
   | { readonly action: "get" }
@@ -24,7 +35,7 @@ export type ThreadComposerSlashCommandItem =
   | {
       readonly id: string;
       readonly type: "slash-command";
-      readonly command: "model" | "goal" | "plan" | "default";
+      readonly command: BuiltInComposerSlashCommand;
       readonly label: string;
       readonly description: string;
     }
@@ -32,6 +43,13 @@ export type ThreadComposerSlashCommandItem =
       readonly id: string;
       readonly type: "provider-slash-command";
       readonly command: ServerProviderSlashCommand;
+      readonly label: string;
+      readonly description: string;
+    }
+  | {
+      readonly id: string;
+      readonly type: "skill";
+      readonly skill: ServerProviderSkill;
       readonly label: string;
       readonly description: string;
     };
@@ -73,67 +91,93 @@ export function buildThreadComposerSlashCommandItems(input: {
   readonly query: string;
   readonly providerDriver: string | null | undefined;
   readonly providerCommands: ReadonlyArray<ServerProviderSlashCommand>;
+  readonly providerSkills?: ReadonlyArray<ServerProviderSkill>;
   readonly showInteractionModeToggle: boolean;
 }): ThreadComposerSlashCommandItem[] {
-  const query = input.query.toLowerCase();
-  const builtIn: ThreadComposerBuiltInSlashCommandItem[] = [
-    {
-      id: "cmd:model",
+  const builtIn: ThreadComposerBuiltInSlashCommandItem[] =
+    BUILT_IN_COMPOSER_SLASH_COMMAND_DEFINITIONS.filter(
+      (definition) =>
+        input.showInteractionModeToggle ||
+        (definition.command !== "plan" && definition.command !== "default"),
+    ).map((definition) => ({
+      id: `cmd:${definition.command}`,
       type: "slash-command",
-      command: "model",
-      label: "/model",
-      description: "Switch model",
-    },
-    ...(providerSupportsThreadGoals(input.providerDriver)
-      ? [
-          {
-            id: "cmd:goal",
-            type: "slash-command" as const,
-            command: "goal" as const,
-            label: "/goal",
-            description: "Run this thread with a persistent goal",
-          },
-        ]
-      : []),
-    ...(input.showInteractionModeToggle
-      ? [
-          {
-            id: "cmd:plan",
-            type: "slash-command" as const,
-            command: "plan" as const,
-            label: "/plan",
-            description: "Switch to plan mode",
-          },
-          {
-            id: "cmd:default",
-            type: "slash-command" as const,
-            command: "default" as const,
-            label: "/default",
-            description: "Switch to default mode",
-          },
-        ]
-      : []),
-  ];
+      command: definition.command,
+      label: definition.label,
+      description: definition.description,
+    }));
+  const providerItems: ThreadComposerSlashCommandItem[] = input.providerCommands
+    .filter((command) => shouldKeepProviderSlashCommand(command.name))
+    .map((command) => ({
+      id: `pcmd:${command.name}`,
+      type: "provider-slash-command",
+      command,
+      label: `/${command.name}`,
+      description: command.description ?? command.input?.hint ?? "",
+    }));
+  const skillItems: ThreadComposerSlashCommandItem[] = (input.providerSkills ?? [])
+    .filter((skill) => skill.enabled)
+    .map((skill) => ({
+      id: `skill:${skill.name}`,
+      type: "skill",
+      skill,
+      label: skill.displayName ?? skill.name,
+      description: skill.shortDescription ?? skill.description ?? "",
+    }));
+  const items = [...builtIn, ...providerItems, ...skillItems];
+  const query = normalizeSearchQuery(input.query, { trimLeadingPattern: /^\/+/ });
+  if (!query) return items;
 
-  const matchingBuiltIn = builtIn.filter((item) => item.command.includes(query));
-  const matchingProvider = input.providerCommands.flatMap((command) => {
-    const normalizedName = command.name.toLowerCase();
-    // /goal is reserved for the native Codex goal operation.
-    if (normalizedName === "goal" || !normalizedName.includes(query)) {
-      return [];
-    }
-    return [
-      {
-        id: `pcmd:${command.name}`,
-        type: "provider-slash-command" as const,
-        command,
-        label: `/${command.name}`,
-        description: command.description ?? "",
-      },
-    ];
-  });
-
-  return [...matchingBuiltIn, ...matchingProvider];
+  const ranked: Array<{
+    item: ThreadComposerSlashCommandItem;
+    score: number;
+    tieBreaker: string;
+  }> = [];
+  for (const item of items) {
+    const primary =
+      item.type === "slash-command"
+        ? item.command
+        : item.type === "provider-slash-command"
+          ? item.command.name
+          : item.skill.name;
+    const scores = [
+      scoreQueryMatch({
+        value: primary.toLowerCase(),
+        query,
+        exactBase: 0,
+        prefixBase: 2,
+        boundaryBase: 4,
+        includesBase: 6,
+        fuzzyBase: 100,
+        boundaryMarkers: ["-", "_", "/"],
+      }),
+      scoreQueryMatch({
+        value: item.label.toLowerCase(),
+        query,
+        exactBase: 1,
+        prefixBase: 3,
+        boundaryBase: 5,
+        includesBase: 7,
+        fuzzyBase: 110,
+        boundaryMarkers: ["-", "_", "/", " "],
+      }),
+      scoreQueryMatch({
+        value: item.description.toLowerCase(),
+        query,
+        exactBase: 20,
+        prefixBase: 22,
+        boundaryBase: 24,
+        includesBase: 26,
+      }),
+    ].filter((score): score is number => score !== null);
+    if (scores.length === 0) continue;
+    insertRankedSearchResult(
+      ranked,
+      { item, score: Math.min(...scores), tieBreaker: item.id },
+      Number.POSITIVE_INFINITY,
+    );
+  }
+  return ranked.map((entry) => entry.item);
 }
 
 export function parseComposerGoalCommand(text: string): ComposerGoalCommand | null {

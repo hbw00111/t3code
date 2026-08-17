@@ -17,6 +17,7 @@ import type {
   ProviderRespondToRequestInput,
   ProviderRespondToUserInputInput,
   ProviderRuntimeEvent,
+  ProviderCompactThreadInput,
   ProviderSendTurnInput,
   ProviderSession,
   ProviderSessionStartInput,
@@ -52,6 +53,11 @@ export interface ProviderServiceShape {
   readonly sendTurn: (
     input: ProviderSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, ProviderServiceError>;
+
+  /** Compact the active provider-native thread context. */
+  readonly compactThread: (
+    input: ProviderCompactThreadInput,
+  ) => Effect.Effect<void, ProviderServiceError>;
 
   /**
    * Update a provider-native thread goal for the active session.

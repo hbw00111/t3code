@@ -1,8 +1,14 @@
-import type { AdvertisedEndpoint, DesktopWslState } from "@t3tools/contracts";
+import type {
+  AdvertisedEndpoint,
+  DesktopWslState,
+  SelfHostedTunnelSettings,
+} from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
   applyWslEnableSelection,
+  createSelfHostedTunnelAdvertisedEndpoint,
   isQrShareableEndpoint,
+  parseSelfHostedTunnelForm,
   selectQrEndpointOption,
 } from "./ConnectionsSettings.logic";
 
@@ -161,5 +167,72 @@ describe("selectQrEndpointOption", () => {
     const loopbackOnly = options.slice(0, 1);
     expect(selectQrEndpointOption(loopbackOnly, null, null)?.id).toBe("desktop-loopback:4780");
     expect(selectQrEndpointOption([], "anything", "anything")).toBeNull();
+  });
+});
+
+const selfHostedTunnelSettings: SelfHostedTunnelSettings = {
+  enabled: true,
+  sshHost: "relay.example.com",
+  sshUser: "t3",
+  sshPort: 22,
+  identityFile: "~/.ssh/t3-relay",
+  remoteBindHost: "127.0.0.1",
+  remotePort: 43883,
+  publicBaseUrl: "https://t3.example.com",
+};
+
+describe("self-hosted tunnel settings", () => {
+  it("normalizes form fields into one validated server settings value", () => {
+    expect(
+      parseSelfHostedTunnelForm({
+        sshHost: " relay.example.com ",
+        sshUser: " t3 ",
+        sshPort: "",
+        identityFile: " ~/.ssh/t3-relay ",
+        remoteBindHost: "",
+        remotePort: "43883",
+        publicBaseUrl: "https://t3.example.com/ignored/path?x=1",
+      }),
+    ).toEqual({
+      ...selfHostedTunnelSettings,
+      sshPort: null,
+      publicBaseUrl: "https://t3.example.com/",
+    });
+  });
+
+  it("rejects invalid ports before saving", () => {
+    expect(() =>
+      parseSelfHostedTunnelForm({
+        sshHost: "relay.example.com",
+        sshUser: "t3",
+        sshPort: "22",
+        identityFile: "",
+        remoteBindHost: "127.0.0.1",
+        remotePort: "70000",
+        publicBaseUrl: "https://t3.example.com",
+      }),
+    ).toThrow("Remote port must be a number from 1 to 65535.");
+  });
+
+  it("advertises the public endpoint only after the tunnel is connected", () => {
+    expect(
+      createSelfHostedTunnelAdvertisedEndpoint(selfHostedTunnelSettings, {
+        state: "connecting",
+        attempt: 1,
+      }),
+    ).toBeNull();
+
+    expect(
+      createSelfHostedTunnelAdvertisedEndpoint(selfHostedTunnelSettings, {
+        state: "connected",
+        pid: 4312,
+      }),
+    ).toMatchObject({
+      httpBaseUrl: "https://t3.example.com/",
+      wsBaseUrl: "wss://t3.example.com/",
+      reachability: "public",
+      compatibility: { hostedHttpsApp: "compatible" },
+      status: "available",
+    });
   });
 });

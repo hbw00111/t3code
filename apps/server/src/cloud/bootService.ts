@@ -542,18 +542,24 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       ]);
     const state = Option.isSome(stateText) ? parseServiceState(stateText.value) : undefined;
     const serviceLoaded = isLinux || (yield* isLaunchAgentLoaded());
+    // A standalone CLI cannot reconstruct the desktop executable path. Status may adopt the
+    // launcher-owned source; install and update still render from the caller's explicit plan.
+    const adoptsInstalledRuntimeForStatus =
+      input.runtimeSource === undefined &&
+      state !== undefined &&
+      state.runtimeSource !== runtimeSource;
     return {
       supported: true,
       installed: true,
       current:
         serviceLoaded &&
-        unit === renderServiceDefinition() &&
+        (adoptsInstalledRuntimeForStatus || unit === renderServiceDefinition()) &&
         launcherExists &&
         runtimeEntryExists &&
         Option.isSome(runtimeSentinel) &&
         runtimeSentinel.value.trim() === input.cliVersion &&
         state?.activeVersion === input.cliVersion &&
-        state.runtimeSource === runtimeSource &&
+        (adoptsInstalledRuntimeForStatus || state.runtimeSource === runtimeSource) &&
         state?.update?.status !== "pending",
       unitPath,
       logPath,

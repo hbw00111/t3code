@@ -17,18 +17,35 @@ import {
 } from "./threadGoalCommands";
 
 describe("mobile thread goal commands", () => {
-  it("only offers the native /goal command for Codex", () => {
-    const commandsFor = (providerDriver: string) =>
+  it("offers the complete app command catalog on every provider", () => {
+    expect(
       buildThreadComposerSlashCommandItems({
         query: "",
-        providerDriver,
+        providerDriver: "codex",
         providerCommands: [],
+        providerSkills: [],
         showInteractionModeToggle: true,
-      }).map((item) => item.label);
-
-    expect(commandsFor("codex")).toContain("/goal");
-    expect(commandsFor("claudeAgent")).not.toContain("/goal");
-    expect(commandsFor("grok")).not.toContain("/goal");
+      })
+        .filter((item) => item.type === "slash-command")
+        .map((item) => item.label),
+    ).toEqual([
+      "/clear",
+      "/compact",
+      "/model",
+      "/plan",
+      "/debug",
+      "/default",
+      "/review",
+      "/fork",
+      "/side",
+      "/status",
+      "/subagents",
+      "/fast",
+      "/export",
+      "/goal",
+      "/feedback",
+      "/automation",
+    ]);
   });
 
   it("requires both a live connection and Codex before executing a goal command", () => {
@@ -87,8 +104,9 @@ describe("mobile thread goal commands", () => {
         query: "goal",
         providerDriver: "claudeAgent",
         providerCommands: [{ name: "goal", description: "Provider goal" }],
+        providerSkills: [],
         showInteractionModeToggle: true,
-      }),
+      }).filter((item) => item.type === "provider-slash-command"),
     ).toEqual([]);
   });
 
@@ -98,9 +116,37 @@ describe("mobile thread goal commands", () => {
         query: "",
         providerDriver: "grok",
         providerCommands: [],
+        providerSkills: [],
         showInteractionModeToggle: false,
       }).map((item) => item.label),
     ).not.toEqual(expect.arrayContaining(["/plan", "/default"]));
+  });
+
+  it("includes enabled skills in slash search results", () => {
+    const items = buildThreadComposerSlashCommandItems({
+      query: "visual art",
+      providerDriver: "codex",
+      providerCommands: [],
+      providerSkills: [
+        {
+          name: "canvas-design",
+          description: "Create visual art and polished documents",
+          path: "/skills/canvas-design/SKILL.md",
+          scope: "user",
+          enabled: true,
+        },
+        {
+          name: "disabled-skill",
+          description: "Create visual art",
+          path: "/skills/disabled/SKILL.md",
+          scope: "user",
+          enabled: false,
+        },
+      ],
+      showInteractionModeToggle: true,
+    });
+
+    expect(items.map((item) => item.id)).toEqual(["skill:canvas-design"]);
   });
 
   it("parses get, set, pause, resume, and clear", () => {

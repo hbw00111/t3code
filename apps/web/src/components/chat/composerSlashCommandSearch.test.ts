@@ -68,4 +68,35 @@ describe("searchSlashCommandItems", () => {
       "provider-slash-command:claudeAgent:gh-fix-ci",
     ]);
   });
+
+  it("searches skills shown below slash commands", () => {
+    const items = [
+      {
+        id: "slash:review",
+        type: "slash-command",
+        command: "review",
+        label: "/review",
+        description: "Start a code review",
+      },
+      {
+        id: "skill:claudeAgent:canvas-design",
+        type: "skill",
+        provider: claudeDriver,
+        skill: {
+          name: "canvas-design",
+          displayName: "Canvas Design",
+          description: "Create visual art and polished documents",
+          path: "/skills/canvas-design/SKILL.md",
+          scope: "user",
+          enabled: true,
+        },
+        label: "Canvas Design",
+        description: "Create visual art and polished documents",
+      },
+    ] satisfies Array<Exclude<ComposerCommandItem, { type: "path" }>>;
+
+    expect(searchSlashCommandItems(items, "visual art").map((item) => item.id)).toEqual([
+      "skill:claudeAgent:canvas-design",
+    ]);
+  });
 });

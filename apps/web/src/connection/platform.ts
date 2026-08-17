@@ -52,6 +52,7 @@ import { clearComposerDraftsEnvironment } from "../composerDraftStore";
 import { isHostedStaticApp } from "../hostedPairing";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { acknowledgeRpcRequest, trackRpcRequestSent } from "../rpc/requestLatencyState";
+import { webApplicationActiveWakeup } from "./app-state-wakeups";
 import {
   desktopLocalConnectionId,
   readDesktopSecondaryBootstrapsResult,
@@ -90,12 +91,18 @@ const connectivityLayer = Connectivity.layer({
 
 const wakeupsLayer = Wakeups.layer({
   changes: Stream.merge(
-    Stream.callback<"application-active">((queue) =>
+    Stream.callback<"application-active-probe" | "application-active-reconnect">((queue) =>
       Effect.acquireRelease(
         Effect.sync(() => {
+          let wasHidden = document.visibilityState === "hidden";
           const listener = () => {
+            if (document.visibilityState === "hidden") {
+              wasHidden = true;
+              return;
+            }
             if (document.visibilityState === "visible") {
-              Queue.offerUnsafe(queue, "application-active");
+              Queue.offerUnsafe(queue, webApplicationActiveWakeup(wasHidden));
+              wasHidden = false;
             }
           };
           document.addEventListener("visibilitychange", listener);

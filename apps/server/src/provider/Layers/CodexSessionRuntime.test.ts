@@ -18,6 +18,7 @@ import {
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import {
   buildTurnStartParams,
+  compactCodexThread,
   hasConfiguredMcpServer,
   isRecoverableThreadResumeError,
   openCodexThread,
@@ -500,6 +501,34 @@ describe("openCodexThread", () => {
 
       NodeAssert.ok(isCodexAppServerRequestError(error));
       NodeAssert.equal(error.errorMessage, "timed out waiting for server");
+    }),
+  );
+});
+
+describe("compactCodexThread", () => {
+  it.effect("sends the provider thread id to thread/compact/start", () =>
+    Effect.gen(function* () {
+      const calls: Array<{ method: string; payload: unknown }> = [];
+      const client = {
+        request: (
+          method: "thread/compact/start",
+          payload: CodexRpc.ClientRequestParamsByMethod["thread/compact/start"],
+        ) => {
+          calls.push({ method, payload });
+          return Effect.succeed(
+            undefined as unknown as CodexRpc.ClientRequestResponsesByMethod["thread/compact/start"],
+          );
+        },
+      };
+
+      yield* compactCodexThread(client, "provider-thread-1");
+
+      NodeAssert.deepStrictEqual(calls, [
+        {
+          method: "thread/compact/start",
+          payload: { threadId: "provider-thread-1" },
+        },
+      ]);
     }),
   );
 });

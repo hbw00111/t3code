@@ -65,6 +65,9 @@ export interface ProviderAdapterShape<TError> {
     input: ProviderSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, TError>;
 
+  /** Compact the provider-native context for an active thread. */
+  readonly compactThread?: (threadId: ThreadId) => Effect.Effect<void, TError>;
+
   /**
    * Update a provider-native thread goal when that provider exposes one.
    */

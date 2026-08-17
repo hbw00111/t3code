@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 export const AdvertisedEndpointProviderKind = Schema.Literals([
   "core",
@@ -66,3 +66,28 @@ export const AdvertisedEndpoint = Schema.Struct({
   description: Schema.optional(TrimmedNonEmptyString),
 });
 export type AdvertisedEndpoint = typeof AdvertisedEndpoint.Type;
+
+export const SelfHostedTunnelStatus = Schema.Union([
+  Schema.Struct({
+    state: Schema.Literal("disabled"),
+  }),
+  Schema.Struct({
+    state: Schema.Literal("connecting"),
+    attempt: PositiveInt,
+  }),
+  Schema.Struct({
+    state: Schema.Literal("connected"),
+    pid: PositiveInt,
+  }),
+  Schema.Struct({
+    state: Schema.Literal("retrying"),
+    attempt: PositiveInt,
+    retryDelayMs: PositiveInt,
+    message: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    state: Schema.Literal("failed"),
+    message: TrimmedNonEmptyString,
+  }),
+]);
+export type SelfHostedTunnelStatus = typeof SelfHostedTunnelStatus.Type;

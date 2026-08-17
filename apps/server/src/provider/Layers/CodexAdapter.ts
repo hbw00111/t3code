@@ -1866,6 +1866,19 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       .pipe(Effect.mapError((cause) => mapCodexRuntimeError(input.threadId, "turn/start", cause)));
   });
 
+  const compactThread: NonNullable<CodexAdapterShape["compactThread"]> = (threadId) =>
+    requireSession(threadId).pipe(
+      Effect.flatMap((session) =>
+        session.runtime
+          .compactThread()
+          .pipe(
+            Effect.mapError((cause) =>
+              mapCodexRuntimeError(threadId, "thread/compact/start", cause),
+            ),
+          ),
+      ),
+    );
+
   const requireSession = Effect.fn("requireSession")(function* (threadId: ThreadId) {
     const session = sessions.get(threadId);
     if (!session || session.stopped) {
@@ -2050,6 +2063,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     },
     startSession,
     sendTurn,
+    compactThread,
     setThreadGoal,
     interruptTurn,
     readThread,

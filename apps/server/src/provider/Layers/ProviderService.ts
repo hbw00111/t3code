@@ -14,6 +14,7 @@ import {
   NonNegativeInt,
   ThreadId,
   ProviderInterruptTurnInput,
+  ProviderCompactThreadInput,
   ProviderRespondToRequestInput,
   ProviderRespondToUserInputInput,
   ProviderSendTurnInput,
@@ -62,6 +63,7 @@ import * as ProviderEventLoggers from "./ProviderEventLoggers.ts";
 import * as AnalyticsService from "../../telemetry/AnalyticsService.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
+import { withProviderDebugModePrompt } from "../debugMode.ts";
 const isModelSelection = Schema.is(ModelSelection);
 
 /**
@@ -703,12 +705,14 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         : [parsed.input, attachmentPathLines.join("\n")]
             .filter((part): part is string => typeof part === "string" && part.length > 0)
             .join("\n\n");
+    const effectiveInputText = withProviderDebugModePrompt({
+      text: inputTextWithAttachmentPaths ?? "",
+      ...(parsed.interactionMode !== undefined ? { interactionMode: parsed.interactionMode } : {}),
+    });
 
     const input = {
       ...parsed,
-      ...(inputTextWithAttachmentPaths !== undefined
-        ? { input: inputTextWithAttachmentPaths }
-        : {}),
+      ...(effectiveInputText.length > 0 ? { input: effectiveInputText } : {}),
       attachments,
     };
     yield* Effect.annotateCurrentSpan({
@@ -804,6 +808,44 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         });
       }
       return yield* setThreadGoal(input);
+    },
+  );
+
+  const compactThread: ProviderServiceMethod<"compactThread"> = Effect.fn("compactThread")(
+    function* (rawInput) {
+      const input = yield* decodeInputOrValidationError({
+        operation: "ProviderService.compactThread",
+        schema: ProviderCompactThreadInput,
+        payload: rawInput,
+      });
+      const routed = yield* resolveRoutableSession({
+        threadId: input.threadId,
+        operation: "ProviderService.compactThread",
+        allowRecovery: true,
+      });
+      const compact = routed.adapter.compactThread;
+      if (compact === undefined) {
+        return yield* new ProviderUnsupportedError({
+          provider: routed.adapter.provider,
+        });
+      }
+      yield* Effect.annotateCurrentSpan({
+        "provider.operation": "compact-thread",
+        "provider.kind": routed.adapter.provider,
+        "provider.thread_id": input.threadId,
+      });
+      yield* compact(routed.threadId);
+      yield* directory.upsert({
+        threadId: input.threadId,
+        provider: routed.adapter.provider,
+        providerInstanceId: routed.instanceId,
+        status: "running",
+        runtimePayload: {
+          activeTurnId: null,
+          lastRuntimeEvent: "provider.compactThread",
+          lastRuntimeEventAt: yield* nowIso,
+        },
+      });
     },
   );
 
@@ -1161,6 +1203,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   return {
     startSession,
     sendTurn,
+    compactThread,
     setThreadGoal,
     interruptTurn,
     respondToRequest,

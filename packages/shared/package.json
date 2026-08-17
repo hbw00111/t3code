@@ -79,6 +79,10 @@
       "types": "./src/serverSettings.ts",
       "import": "./src/serverSettings.ts"
     },
+    "./selfHostedTunnel": {
+      "types": "./src/selfHostedTunnel.ts",
+      "import": "./src/selfHostedTunnel.ts"
+    },
     "./backgroundActivitySettings": {
       "types": "./src/backgroundActivitySettings.ts",
       "import": "./src/backgroundActivitySettings.ts"
@@ -162,6 +166,10 @@
     "./composerTrigger": {
       "types": "./src/composerTrigger.ts",
       "import": "./src/composerTrigger.ts"
+    },
+    "./composerSlashCommands": {
+      "types": "./src/composerSlashCommands.ts",
+      "import": "./src/composerSlashCommands.ts"
     },
     "./composerInlineTokens": {
       "types": "./src/composerInlineTokens.ts",

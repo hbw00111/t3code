@@ -998,10 +998,31 @@ export const stageDesktopServiceBundle = Effect.fn("stageDesktopServiceBundle")(
   yield* fs.copy(input.sourceDir, input.destinationDir);
 });
 
+export const stageDesktopServiceDistribution = Effect.fn("stageDesktopServiceDistribution")(
+  function* (input: {
+    readonly serverServiceDist: string;
+    readonly serverClientDist: string;
+    readonly destinationDist: string;
+  }) {
+    const path = yield* Path.Path;
+    yield* Effect.all([
+      stageDesktopServiceBundle({
+        sourceDir: input.serverServiceDist,
+        destinationDir: input.destinationDist,
+      }),
+      stageDesktopServiceBundle({
+        sourceDir: input.serverClientDist,
+        destinationDir: path.join(input.destinationDist, "client"),
+      }),
+    ]);
+  },
+);
+
 const stageDesktopServiceRuntime = Effect.fn("stageDesktopServiceRuntime")(function* (input: {
   readonly stageAppDir: string;
   readonly stageProdResourcesDir: string;
   readonly serverServiceDist: string;
+  readonly serverClientDist: string;
   readonly version: string;
   readonly platform: typeof BuildPlatform.Type;
   readonly arch: typeof BuildArch.Type;
@@ -1017,9 +1038,10 @@ const stageDesktopServiceRuntime = Effect.fn("stageDesktopServiceRuntime")(funct
   const runtimeNodeModules = path.join(runtimeDir, "node_modules");
   const t3PackageDir = path.join(runtimeNodeModules, "t3");
   const t3DistDir = path.join(t3PackageDir, "dist");
-  yield* stageDesktopServiceBundle({
-    sourceDir: input.serverServiceDist,
-    destinationDir: t3DistDir,
+  yield* stageDesktopServiceDistribution({
+    serverServiceDist: input.serverServiceDist,
+    serverClientDist: input.serverClientDist,
+    destinationDist: t3DistDir,
   });
   const t3PackageJson = yield* encodeJsonString({
     name: "t3",
@@ -2113,14 +2135,18 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     { label: "vp install --prod", verbose: options.verbose },
   );
   yield* stageClerkPasskeyNativeBinaries(stageAppDir, options.platform, options.arch);
-  yield* stageDesktopServiceRuntime({
+  const stagedDesktopRuntime = yield* stageDesktopServiceRuntime({
     stageAppDir,
     stageProdResourcesDir: path.join(stageAppDir, "apps/desktop/prod-resources"),
     serverServiceDist: distDirs.serverServiceDist,
+    serverClientDist: path.join(distDirs.serverDist, "client"),
     version: appVersion,
     platform: options.platform,
     arch: options.arch,
   });
+  yield* validateBundledClientAssets(
+    path.join(stagedDesktopRuntime, "node_modules", "t3", "dist", "client"),
+  );
 
   // WSL is Windows-only, so only the Windows artifact carries the Linux backend
   // binary; other platforms ignore the prebuild input.

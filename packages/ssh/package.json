@@ -22,6 +22,10 @@
     "./tunnel": {
       "types": "./src/tunnel.ts",
       "import": "./src/tunnel.ts"
+    },
+    "./reverseTunnel": {
+      "types": "./src/reverseTunnel.ts",
+      "import": "./src/reverseTunnel.ts"
     }
   },
   "scripts": {

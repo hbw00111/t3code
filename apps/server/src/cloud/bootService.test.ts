@@ -104,27 +104,37 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
         };
       }),
   });
-  const service = yield* BootService.make({
-    baseDir,
-    logsDir: path.join(baseDir, "userdata", "logs"),
-    cliVersion: "1.2.3",
-    host: {
-      execPath: "/usr/bin/node",
-      uid: 501,
-      ...(usePinnedLauncher ? {} : { launcherSourcePath: sourceLauncher }),
-    },
-  }).pipe(
-    Effect.provideService(ProcessRunner.ProcessRunner, runner),
-    Effect.provide(
-      Layer.mergeAll(
-        Layer.succeed(HostProcessPlatform, platform),
-        Layer.succeed(HostProcessExecutablePath, "/usr/bin/node"),
-        Layer.succeed(HostProcessArguments, ["/usr/bin/node", path.join(home, "bin.mjs")]),
-        ConfigProvider.layer(ConfigProvider.fromEnv({ env: { HOME: home } })),
+  const makeService = (options?: {
+    readonly execPath?: string;
+    readonly runtimeSource?: "registry" | "desktop-bundle";
+    readonly bundledRuntimeDir?: string;
+  }) =>
+    BootService.make({
+      baseDir,
+      logsDir: path.join(baseDir, "userdata", "logs"),
+      cliVersion: "1.2.3",
+      ...(options?.runtimeSource === undefined ? {} : { runtimeSource: options.runtimeSource }),
+      ...(options?.bundledRuntimeDir === undefined
+        ? {}
+        : { bundledRuntimeDir: options.bundledRuntimeDir }),
+      host: {
+        execPath: options?.execPath ?? "/usr/bin/node",
+        uid: 501,
+        ...(usePinnedLauncher ? {} : { launcherSourcePath: sourceLauncher }),
+      },
+    }).pipe(
+      Effect.provideService(ProcessRunner.ProcessRunner, runner),
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.succeed(HostProcessPlatform, platform),
+          Layer.succeed(HostProcessExecutablePath, "/usr/bin/node"),
+          Layer.succeed(HostProcessArguments, ["/usr/bin/node", path.join(home, "bin.mjs")]),
+          ConfigProvider.layer(ConfigProvider.fromEnv({ env: { HOME: home } })),
+        ),
       ),
-    ),
-  );
-  return { service, fs, statePath, commands, control };
+    );
+  const service = yield* makeService();
+  return { service, makeService, fs, statePath, commands, control };
 });
 
 it.layer(NodeServices.layer)("boot service install", (it) => {
@@ -170,6 +180,27 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
 
       expect(yield* fs.readFileString(plan.launcherPath)).toBe(
         "export const source = 'pinned runtime';\n",
+      );
+    }),
+  );
+
+  it.effect("recognizes a current desktop-managed service from the standalone CLI", () =>
+    Effect.gen(function* () {
+      const { makeService, fs, statePath } = yield* makeHarness();
+      const desktopService = yield* makeService({
+        execPath: "/Applications/T3 Code.app/Contents/MacOS/T3 Code",
+        runtimeSource: "desktop-bundle",
+        bundledRuntimeDir: "/Applications/T3 Code.app/Contents/Resources/service-runtime",
+      });
+      yield* desktopService.install;
+
+      const standaloneCliService = yield* makeService({ execPath: "/usr/bin/node" });
+      expect((yield* standaloneCliService.status).current).toBe(true);
+
+      const plan = yield* standaloneCliService.install;
+      expect(plan.nodePath).toBe("/usr/bin/node");
+      expect(parseServiceState(yield* fs.readFileString(statePath))?.runtimeSource).toBe(
+        "registry",
       );
     }),
   );

@@ -121,7 +121,7 @@ describe("ComposerLiveStatusStrip", () => {
       row,
       (element) =>
         Array.isArray(element.props.children) &&
-        element.props.children[0] === 2 &&
+        element.props.children[0] === 3 &&
         element.props.children[2] === 4,
     );
     const usage = visitElements(
@@ -162,7 +162,15 @@ describe("ComposerLiveStatusStrip", () => {
       (element) =>
         element.type === "button" && element.props["data-composer-plan-disclosure"] === "true",
     );
+    const initialOrdinal = visitElements(
+      collapsed,
+      (element) =>
+        Array.isArray(element.props.children) &&
+        element.props.children[0] === 1 &&
+        element.props.children[2] === 3,
+    );
     expect(disclosure?.props["aria-expanded"]).toBe(false);
+    expect(initialOrdinal).not.toBeNull();
     expect(elementWithText(collapsed, "Implement the fix")).toBeNull();
     (disclosure?.props.onClick as (() => void) | undefined)?.();
 
@@ -193,11 +201,19 @@ describe("ComposerLiveStatusStrip", () => {
       expanded,
       (element) => element.props["data-composer-plan-segment-status"] === "completed",
     );
+    const currentOrdinal = visitElements(
+      expanded,
+      (element) =>
+        Array.isArray(element.props.children) &&
+        element.props.children[0] === 3 &&
+        element.props.children[2] === 3,
+    );
 
     expect(expandedDisclosure?.props["aria-expanded"]).toBe(true);
     expect(elementWithText(expanded, "Implement the fix")).not.toBeNull();
     expect(completedRows).not.toBeNull();
     expect(progress).not.toBeNull();
+    expect(currentOrdinal).not.toBeNull();
   });
 
   it("saves an edited objective with Enter", () => {

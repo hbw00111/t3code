@@ -4,7 +4,27 @@ import {
   type ServerProviderSkill,
   type ServerProviderSlashCommand,
 } from "@t3tools/contracts";
-import { BotIcon, HammerIcon, LightbulbIcon, type LucideIcon, TargetIcon } from "lucide-react";
+import {
+  ArchiveIcon,
+  BoxIcon,
+  BotIcon,
+  BugIcon,
+  CircleGaugeIcon,
+  ClockIcon,
+  DownloadIcon,
+  EraserIcon,
+  GitForkIcon,
+  HammerIcon,
+  LightbulbIcon,
+  MessageCircleIcon,
+  MessageSquareMoreIcon,
+  NetworkIcon,
+  ScanSearchIcon,
+  SquareTerminalIcon,
+  TargetIcon,
+  type LucideIcon,
+  ZapIcon,
+} from "lucide-react";
 import { memo, useLayoutEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -61,34 +81,27 @@ type ComposerCommandGroup = {
 };
 
 const BUILT_IN_COMMAND_ICONS: Record<ComposerSlashCommand, LucideIcon> = {
+  clear: EraserIcon,
+  compact: ArchiveIcon,
   model: BotIcon,
-  goal: TargetIcon,
   plan: LightbulbIcon,
+  debug: BugIcon,
   default: HammerIcon,
+  review: ScanSearchIcon,
+  fork: GitForkIcon,
+  side: MessageCircleIcon,
+  status: CircleGaugeIcon,
+  subagents: NetworkIcon,
+  fast: ZapIcon,
+  export: DownloadIcon,
+  goal: TargetIcon,
+  feedback: MessageSquareMoreIcon,
+  automation: ClockIcon,
 };
 
 function BuiltInCommandGlyph({ command }: { readonly command: ComposerSlashCommand }) {
   const Icon = BUILT_IN_COMMAND_ICONS[command];
   return <Icon className="size-4 shrink-0 text-icon-muted" />;
-}
-
-function SkillGlyph(props: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.85"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={props.className}
-      aria-hidden="true"
-    >
-      <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
-      <path d="m3.3 7 8.7 5 8.7-5" />
-      <path d="M12 22V12" />
-    </svg>
-  );
 }
 
 function groupCommandItems(
@@ -106,6 +119,7 @@ function groupCommandItems(
 
   const builtInItems = items.filter((item) => item.type === "slash-command");
   const providerItems = items.filter((item) => item.type === "provider-slash-command");
+  const skillItems = items.filter((item) => item.type === "skill");
 
   const groups: ComposerCommandGroup[] = [];
   if (builtInItems.length > 0) {
@@ -113,6 +127,9 @@ function groupCommandItems(
   }
   if (providerItems.length > 0) {
     groups.push({ id: "provider", label: labels.provider, items: providerItems });
+  }
+  if (skillItems.length > 0) {
+    groups.push({ id: "skills", label: labels.skills, items: skillItems });
   }
   return groups;
 }
@@ -163,7 +180,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
         className="dropdown-glass relative w-full overflow-hidden rounded-[20px] **:data-[slot=scroll-area-scrollbar]:data-[orientation=vertical]:my-4"
       >
         {props.items.length > 0 ? (
-          <CommandList className="max-h-72">
+          <CommandList className="max-h-[min(34rem,55vh)]">
             {groups.map((group, groupIndex) => (
               <div key={group.id}>
                 {groupIndex > 0 ? <CommandSeparator className="my-0.5" /> : null}
@@ -257,12 +274,12 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
       ) : null}
       {props.item.type === "provider-slash-command" ? (
         <span className="inline-flex size-4 shrink-0 items-center justify-center text-icon-muted">
-          <SkillGlyph className="size-3.5" />
+          <SquareTerminalIcon className="size-3.5" />
         </span>
       ) : null}
       {props.item.type === "skill" ? (
         <span className="inline-flex size-4 shrink-0 items-center justify-center text-icon-muted">
-          <SkillGlyph className="size-3.5" />
+          <BoxIcon className="size-3.5" />
         </span>
       ) : null}
       <span className="flex min-w-0 flex-1 items-center gap-2">
@@ -271,7 +288,9 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
           {props.item.description}
         </span>
       </span>
-      {skillSourceLabel ? (
+      {props.item.type === "slash-command" ? (
+        <span className="shrink-0 pl-2 text-secondary-label text-xs">/{props.item.command}</span>
+      ) : skillSourceLabel ? (
         <span className="shrink-0 pl-2 text-secondary-label text-xs">{skillSourceLabel}</span>
       ) : null}
     </CommandItem>

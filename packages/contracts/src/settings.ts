@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect";
 import * as Duration from "effect/Duration";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
-import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
+import { PortSchema, TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
 import { ThreadEnvMode } from "./environment.ts";
 import {
   DEFAULT_TEXT_GENERATION_MODEL,
@@ -542,6 +542,18 @@ export const BackgroundActivitySettings = Schema.Struct({
 }).pipe(Schema.withDecodingDefault(Effect.succeed({})));
 export type BackgroundActivitySettings = typeof BackgroundActivitySettings.Type;
 
+export const SelfHostedTunnelSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  sshHost: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  sshUser: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  sshPort: Schema.NullOr(PortSchema).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  identityFile: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  remoteBindHost: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed("127.0.0.1"))),
+  remotePort: PortSchema.pipe(Schema.withDecodingDefault(Effect.succeed(3773))),
+  publicBaseUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+}).pipe(Schema.withDecodingDefault(Effect.succeed({})));
+export type SelfHostedTunnelSettings = typeof SelfHostedTunnelSettings.Type;
+
 export const ServerSettings = Schema.Struct({
   // Legacy token-by-token assistant output. Deliberately a fresh key (was
   // `enableAssistantStreaming`): decoding drops the old key, so everyone,
@@ -593,6 +605,7 @@ export const ServerSettings = Schema.Struct({
   sourceControlWriterModelSelection: Schema.NullOr(ModelSelection).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  selfHostedTunnel: SelfHostedTunnelSettings,
 
   // Legacy single-instance-per-driver settings. Continues to be the source
   // of truth until `providerInstances` (below) lands per-driver migration
@@ -736,6 +749,18 @@ export const ServerSettingsPatch = Schema.Struct({
     }),
   ),
   sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  selfHostedTunnel: Schema.optionalKey(
+    Schema.Struct({
+      enabled: Schema.optionalKey(Schema.Boolean),
+      sshHost: Schema.optionalKey(TrimmedString),
+      sshUser: Schema.optionalKey(TrimmedString),
+      sshPort: Schema.optionalKey(Schema.NullOr(PortSchema)),
+      identityFile: Schema.optionalKey(TrimmedString),
+      remoteBindHost: Schema.optionalKey(TrimmedString),
+      remotePort: Schema.optionalKey(PortSchema),
+      publicBaseUrl: Schema.optionalKey(TrimmedString),
+    }),
+  ),
   observability: Schema.optionalKey(
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),

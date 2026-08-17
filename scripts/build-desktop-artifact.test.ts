@@ -46,6 +46,7 @@ import {
   resolvePackageManagerUserAgent,
   stageLinuxIconSize,
   stageDesktopServiceBundle,
+  stageDesktopServiceDistribution,
   STAGE_INSTALL_ARGS,
   WINDOWS_ASAR_UNPACK,
 } from "./build-desktop-artifact.ts";
@@ -648,6 +649,39 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.equal(
         yield* fs.readFileString(path.join(destinationDir, "service-launcher.mjs.map")),
         "{}\n",
+      );
+    }),
+  );
+
+  it.effect("stages the web client with the desktop background service", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const rootDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "desktop-service-client-",
+      });
+      const serverServiceDist = path.join(rootDir, "dist-service");
+      const serverClientDist = path.join(rootDir, "dist", "client");
+      const destinationDist = path.join(rootDir, "runtime", "node_modules", "t3", "dist");
+      yield* Effect.all([
+        fs.makeDirectory(serverServiceDist, { recursive: true }),
+        fs.makeDirectory(serverClientDist, { recursive: true }),
+      ]);
+      yield* Effect.all([
+        fs.writeFileString(path.join(serverServiceDist, "bin.mjs"), "export {};\n"),
+        fs.writeFileString(path.join(serverClientDist, "index.html"), "<!doctype html>\n"),
+      ]);
+
+      yield* stageDesktopServiceDistribution({
+        serverServiceDist,
+        serverClientDist,
+        destinationDist,
+      });
+
+      assert.equal(yield* fs.readFileString(path.join(destinationDist, "bin.mjs")), "export {};\n");
+      assert.equal(
+        yield* fs.readFileString(path.join(destinationDist, "client", "index.html")),
+        "<!doctype html>\n",
       );
     }),
   );

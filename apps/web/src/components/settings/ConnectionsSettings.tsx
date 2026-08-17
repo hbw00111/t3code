@@ -43,6 +43,7 @@ import { formatElapsedDurationLabel, formatExpiresInLabel } from "../../timestam
 import { resolveDesktopPairingUrl, resolveHostedPairingUrl } from "./pairingUrls";
 import {
   applyWslEnableSelection,
+  createSelfHostedTunnelAdvertisedEndpoint,
   isQrShareableEndpoint,
   selectQrEndpointOption,
 } from "./ConnectionsSettings.logic";
@@ -131,6 +132,8 @@ import { ConnectionStatusDot } from "../ConnectionStatusDot";
 import { ServerUpdateAction, ServerUpdateProgress } from "../ServerUpdateAction";
 import { CloudEnvironmentConnectRows } from "../cloud/CloudEnvironmentConnectList";
 import { ITEM_ROW_CLASSNAME, ITEM_ROW_INNER_CLASSNAME } from "./itemRows";
+import { usePrimarySettings } from "../../hooks/useSettings";
+import { SelfHostedTunnelSettingsRow } from "./SelfHostedTunnelSettings";
 
 const DEFAULT_TAILSCALE_SERVE_PORT = 443;
 const EMPTY_ADVERTISED_ENDPOINTS: ReadonlyArray<AdvertisedEndpoint> = [];
@@ -1730,6 +1733,7 @@ export function ConnectionsSettings() {
   const desktopBridge = window.desktopBridge;
   const { environments } = useEnvironments();
   const primaryEnvironment = usePrimaryEnvironment();
+  const selfHostedTunnelSettings = usePrimarySettings((settings) => settings.selfHostedTunnel);
   const connectPairing = useAtomCommand(connectPairingAtom, { reportFailure: false });
   const connectSshEnvironment = useAtomCommand(connectSshEnvironmentAtom, {
     reportFailure: false,
@@ -1850,6 +1854,7 @@ export function ConnectionsSettings() {
     DesktopServerExposureState["mode"] | null
   >(null);
   const primaryServerConfig = primaryEnvironment?.serverConfig ?? null;
+  const selfHostedTunnelStatus = primaryServerConfig?.selfHostedTunnelStatus;
   const primaryVersionMismatch = resolveServerConfigVersionMismatch(primaryServerConfig);
   const primaryServerUpdateState = useAtomValue(
     serverEnvironment.updateStateAtom(primaryEnvironmentId),
@@ -2315,6 +2320,11 @@ export function ConnectionsSettings() {
     () => desktopAdvertisedEndpoints.find(isTailscaleHttpsEndpoint) ?? null,
     [desktopAdvertisedEndpoints],
   );
+  const selfHostedTunnelEndpoint = useMemo(
+    () =>
+      createSelfHostedTunnelAdvertisedEndpoint(selfHostedTunnelSettings, selfHostedTunnelStatus),
+    [selfHostedTunnelSettings, selfHostedTunnelStatus],
+  );
   const visibleDesktopNetworkAdvertisedEndpoints = useMemo(
     () =>
       isLocalBackendNetworkAccessible
@@ -2323,14 +2333,17 @@ export function ConnectionsSettings() {
     [desktopAdvertisedEndpoints, isLocalBackendNetworkAccessible],
   );
   const visibleDesktopAdvertisedEndpoints = useMemo(
-    () =>
-      tailscaleHttpsEndpoint
-        ? [...visibleDesktopNetworkAdvertisedEndpoints, tailscaleHttpsEndpoint]
-        : visibleDesktopNetworkAdvertisedEndpoints,
-    [tailscaleHttpsEndpoint, visibleDesktopNetworkAdvertisedEndpoints],
+    () => [
+      ...visibleDesktopNetworkAdvertisedEndpoints,
+      ...(tailscaleHttpsEndpoint ? [tailscaleHttpsEndpoint] : []),
+      ...(selfHostedTunnelEndpoint ? [selfHostedTunnelEndpoint] : []),
+    ],
+    [selfHostedTunnelEndpoint, tailscaleHttpsEndpoint, visibleDesktopNetworkAdvertisedEndpoints],
   );
   const isLocalBackendRemotelyReachable =
-    isLocalBackendNetworkAccessible || tailscaleHttpsEndpoint?.status === "available";
+    isLocalBackendNetworkAccessible ||
+    tailscaleHttpsEndpoint?.status === "available" ||
+    selfHostedTunnelEndpoint !== null;
   const defaultDesktopNetworkAdvertisedEndpoint = useMemo(
     () =>
       selectPairingEndpoint(visibleDesktopNetworkAdvertisedEndpoints, defaultAdvertisedEndpointKey),
@@ -2338,12 +2351,13 @@ export function ConnectionsSettings() {
   );
   const defaultDesktopAdvertisedEndpoint = useMemo(
     () =>
-      defaultDesktopNetworkAdvertisedEndpoint ??
-      selectPairingEndpoint(
-        tailscaleHttpsEndpoint ? [tailscaleHttpsEndpoint] : [],
-        defaultAdvertisedEndpointKey,
-      ),
-    [defaultAdvertisedEndpointKey, defaultDesktopNetworkAdvertisedEndpoint, tailscaleHttpsEndpoint],
+      selectPairingEndpoint(visibleDesktopAdvertisedEndpoints, defaultAdvertisedEndpointKey) ??
+      defaultDesktopNetworkAdvertisedEndpoint,
+    [
+      defaultAdvertisedEndpointKey,
+      defaultDesktopNetworkAdvertisedEndpoint,
+      visibleDesktopAdvertisedEndpoints,
+    ],
   );
   const defaultDesktopAdvertisedEndpointKey = defaultDesktopAdvertisedEndpoint
     ? endpointDefaultPreferenceKey(defaultDesktopAdvertisedEndpoint)
@@ -3047,6 +3061,10 @@ export function ConnectionsSettings() {
               <>
                 {renderNetworkAccessRow()}
                 {renderEndpointRows("endpoint-rail")}
+                <SelfHostedTunnelSettingsRow
+                  settings={selfHostedTunnelSettings}
+                  status={selfHostedTunnelStatus}
+                />
                 {renderTailscaleRow()}
                 {renderWslRow()}
                 <CloudLinkRow canManageRelay={canManageRelay} />
@@ -3054,6 +3072,10 @@ export function ConnectionsSettings() {
             ) : (
               <>
                 {renderDisabledNetworkAccessRow()}
+                <SelfHostedTunnelSettingsRow
+                  settings={selfHostedTunnelSettings}
+                  status={selfHostedTunnelStatus}
+                />
                 <CloudLinkRow canManageRelay={canManageRelay} />
               </>
             )}

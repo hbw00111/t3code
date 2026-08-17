@@ -42,6 +42,7 @@ import {
   createModelSelection,
   resolvePromptInjectedEffort,
 } from "@t3tools/shared/model";
+import type { ComposerSlashInvocation } from "@t3tools/shared/composerSlashCommands";
 import { CHAT_LIST_ANCHOR_OFFSET } from "@t3tools/shared/chatList";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
@@ -74,6 +75,8 @@ import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
+import { buildForkedThreadPrompt, buildSideThreadPrompt } from "../lib/composerThreadCommands";
+import { downloadThreadExport } from "../lib/threadExport";
 import { useDiffPanelStore } from "../diffPanelStore";
 import {
   collapseExpandedComposerCursor,
@@ -1220,6 +1223,9 @@ function ChatViewContent(props: ChatViewProps) {
   const routeThreadKey = useMemo(() => scopedThreadKey(routeThreadRef), [routeThreadRef]);
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const upsertKeybinding = useAtomCommand(serverEnvironment.upsertKeybinding, {
+    reportFailure: false,
+  });
+  const compactThread = useAtomCommand(serverEnvironment.compactThread, {
     reportFailure: false,
   });
   const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
@@ -3462,7 +3468,7 @@ function ChatViewContent(props: ChatViewProps) {
     ],
   );
   const toggleInteractionMode = useCallback(() => {
-    handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
+    handleInteractionModeChange(interactionMode === "default" ? "plan" : "default");
   }, [handleInteractionModeChange, interactionMode]);
   const createBrowserSurface = useCallback(() => {
     if (!activeThreadRef) return;
@@ -6268,6 +6274,103 @@ function ChatViewContent(props: ChatViewProps) {
       settings,
     ],
   );
+  const onExecuteBuiltInSlashCommand = useCallback(
+    async (invocation: ComposerSlashInvocation) => {
+      if (invocation.command === "clear") {
+        if (activeProjectRef) {
+          await handleNewThread(activeProjectRef);
+        }
+        return;
+      }
+
+      if (invocation.command === "compact") {
+        if (!activeThread || !isServerThread) {
+          toastManager.add({
+            type: "warning",
+            title: "Start the thread before compacting",
+          });
+          return;
+        }
+        const result = await compactThread({
+          environmentId: activeThread.environmentId,
+          input: { threadId: activeThread.id },
+        });
+        if (result._tag === "Failure") {
+          if (!isAtomCommandInterrupted(result)) {
+            const error = squashAtomCommandFailure(result);
+            toastManager.add({
+              type: "error",
+              title: "Could not compact thread",
+              description: chatActionErrorMessage(error),
+            });
+          }
+          return;
+        }
+        toastManager.add({ type: "success", title: "Thread context compacted" });
+        return;
+      }
+
+      if (invocation.command === "fork" || invocation.command === "side") {
+        if (!activeProjectRef || !activeThread) return;
+        const worktreePrefix = /^worktree(?:\s+|$)/i;
+        const localPrefix = /^local(?:\s+|$)/i;
+        const useWorktree = invocation.command === "fork" && worktreePrefix.test(invocation.args);
+        const task =
+          invocation.command === "fork"
+            ? invocation.args.replace(useWorktree ? worktreePrefix : localPrefix, "").trim()
+            : invocation.args;
+        const prompt =
+          invocation.command === "fork"
+            ? buildForkedThreadPrompt(activeThread, task)
+            : buildSideThreadPrompt(activeThread, task);
+
+        await handleNewThread(activeProjectRef, {
+          envMode: useWorktree ? "worktree" : "local",
+        });
+        const draft = useComposerDraftStore
+          .getState()
+          .getDraftSessionByProjectRef(activeProjectRef);
+        if (!draft) {
+          toastManager.add({
+            type: "error",
+            title: `Could not create ${invocation.command === "fork" ? "fork" : "side thread"}`,
+          });
+          return;
+        }
+        useComposerDraftStore.getState().setPrompt(draft.draftId, prompt);
+        scheduleComposerFocus();
+        return;
+      }
+
+      if (invocation.command === "export") {
+        if (activeThread) {
+          downloadThreadExport(activeThread);
+          toastManager.add({ type: "success", title: "Thread exported" });
+        }
+        return;
+      }
+
+      if (invocation.command === "feedback") {
+        try {
+          await readLocalApi()?.shell.openExternal("https://github.com/hbw00111/t3code/issues/new");
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Could not open feedback page",
+            description: chatActionErrorMessage(error),
+          });
+        }
+      }
+    },
+    [
+      activeProjectRef,
+      activeThread,
+      compactThread,
+      handleNewThread,
+      isServerThread,
+      scheduleComposerFocus,
+    ],
+  );
   const onEnvModeChange = useCallback(
     (mode: DraftThreadEnvMode) => {
       if (canOverrideServerThreadEnvMode) {
@@ -6730,6 +6833,7 @@ function ChatViewContent(props: ChatViewProps) {
                             toggleInteractionMode={toggleInteractionMode}
                             handleRuntimeModeChange={handleRuntimeModeChange}
                             handleInteractionModeChange={handleInteractionModeChange}
+                            onExecuteBuiltInSlashCommand={onExecuteBuiltInSlashCommand}
                             focusComposer={focusComposer}
                             scheduleComposerFocus={scheduleComposerFocus}
                             setThreadError={setThreadError}

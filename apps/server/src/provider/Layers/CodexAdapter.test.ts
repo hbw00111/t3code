@@ -92,6 +92,8 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
       }),
   );
 
+  public readonly compactThreadImpl = vi.fn((): Promise<void> => Promise.resolve(undefined));
+
   public readonly getGoalImpl = vi.fn(
     (): Promise<ThreadGoalSnapshot | null> => Promise.resolve(fakeGoal()),
   );
@@ -156,6 +158,10 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
 
   sendTurn(input: CodexSessionRuntimeSendTurnInput) {
     return Effect.promise(() => this.sendTurnImpl(input));
+  }
+
+  compactThread() {
+    return Effect.promise(() => this.compactThreadImpl());
   }
 
   getGoal() {
@@ -432,6 +438,26 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       NodeAssert.equal(runtime.pauseGoalImpl.mock.calls.length, 1);
       NodeAssert.equal(runtime.resumeGoalImpl.mock.calls.length, 1);
       NodeAssert.equal(runtime.clearGoalImpl.mock.calls.length, 1);
+    }),
+  );
+
+  it.effect("forwards context compaction to the Codex runtime", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const threadId = asThreadId("sess-compact");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const runtime = sessionRuntimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+      const compactThread = adapter.compactThread;
+      NodeAssert.ok(compactThread);
+
+      yield* compactThread(threadId);
+
+      NodeAssert.equal(runtime.compactThreadImpl.mock.calls.length, 1);
     }),
   );
 

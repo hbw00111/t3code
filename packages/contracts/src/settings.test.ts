@@ -195,6 +195,45 @@ describe("ServerSettings worktree defaults", () => {
   });
 });
 
+describe("ServerSettings.selfHostedTunnel", () => {
+  it("defaults legacy settings to a disabled loopback-bound reverse tunnel", () => {
+    expect(decodeServerSettings({}).selfHostedTunnel).toEqual({
+      enabled: false,
+      sshHost: "",
+      sshUser: "",
+      sshPort: null,
+      identityFile: "",
+      remoteBindHost: "127.0.0.1",
+      remotePort: 3773,
+      publicBaseUrl: "",
+    });
+  });
+
+  it("trims tunnel strings and validates ports in partial updates", () => {
+    expect(
+      decodeServerSettingsPatch({
+        selfHostedTunnel: {
+          enabled: true,
+          sshHost: "  relay.example.com  ",
+          sshUser: "  t3  ",
+          sshPort: 2222,
+          remotePort: 43883,
+          publicBaseUrl: "  https://t3.example.com  ",
+        },
+      }).selfHostedTunnel,
+    ).toEqual({
+      enabled: true,
+      sshHost: "relay.example.com",
+      sshUser: "t3",
+      sshPort: 2222,
+      remotePort: 43883,
+      publicBaseUrl: "https://t3.example.com",
+    });
+
+    expect(() => decodeServerSettingsPatch({ selfHostedTunnel: { remotePort: 70_000 } })).toThrow();
+  });
+});
+
 describe("ServerSettings.sourceControlWritingStyle", () => {
   it("defaults all style settings for legacy configs", () => {
     const settings = decodeServerSettings({});

@@ -75,7 +75,11 @@ export function threadSettingsSummaryLabel(input: {
     input.modelLabel,
     ...providerOptionValueLabels(input.optionDescriptors),
     ...(runtime ? [runtime.shortLabel] : []),
-    ...(input.interactionMode === "plan" ? ["Plan"] : []),
+    ...(input.interactionMode === "plan"
+      ? ["Plan"]
+      : input.interactionMode === "debug"
+        ? ["Debug"]
+        : []),
   ].join(" · ");
 }
 

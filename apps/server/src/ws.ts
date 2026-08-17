@@ -30,6 +30,7 @@ import {
   OrchestrationGetSnapshotError,
   OrchestrationSearchThreadsError,
   OrchestrationGetTurnDiffError,
+  ProviderCompactThreadError,
   ORCHESTRATION_WS_METHODS,
   type ProjectId,
   type ProjectEntriesFailure,
@@ -79,11 +80,13 @@ import {
   observeRpcStreamEffect as instrumentRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
+import * as ProviderService from "./provider/Services/ProviderService.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as SelfHostedTunnelRuntime from "./remoteAccess/SelfHostedTunnelRuntime.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -368,11 +371,13 @@ const makeWsRpcLayer = (
       const previewManager = yield* PreviewManager.PreviewManager;
       const portDiscovery = yield* PortScanner.PortDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
+      const providerService = yield* ProviderService.ProviderService;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
+      const selfHostedTunnelRuntime = yield* SelfHostedTunnelRuntime.SelfHostedTunnelRuntime;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
@@ -1021,6 +1026,7 @@ const makeWsRpcLayer = (
             otlpMetricsEnabled: config.otlpMetricsUrl !== undefined,
           },
           settings,
+          selfHostedTunnelStatus: yield* selfHostedTunnelRuntime.getStatus,
           shellResumeCompletionMarker: true,
           threadResumeCompletionMarker: true,
           threadSnapshotPagination: true,
@@ -1446,6 +1452,22 @@ const makeWsRpcLayer = (
               : providerRegistry.refresh()
             ).pipe(Effect.map((providers) => ({ providers }))),
             { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.providerCompactThread]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.providerCompactThread,
+            providerService.compactThread(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderCompactThreadError({
+                    detail:
+                      cause instanceof Error && cause.message.trim().length > 0
+                        ? cause.message
+                        : "Could not compact the provider thread.",
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "provider" },
           ),
         [WS_METHODS.serverUpdateProvider]: (input) =>
           observeRpcEffect(
@@ -2105,6 +2127,14 @@ const makeWsRpcLayer = (
                   payload: { settings },
                 })),
               );
+              const selfHostedTunnelStatusUpdates =
+                (yield* selfHostedTunnelRuntime.subscribeChanges).pipe(
+                  Stream.map((status) => ({
+                    version: 1 as const,
+                    type: "selfHostedTunnelStatusUpdated" as const,
+                    payload: { status },
+                  })),
+                );
 
               yield* providerRegistry
                 .refresh()
@@ -2112,7 +2142,10 @@ const makeWsRpcLayer = (
 
               const liveUpdates = Stream.merge(
                 keybindingsUpdates,
-                Stream.merge(providerStatuses, settingsUpdates),
+                Stream.merge(
+                  providerStatuses,
+                  Stream.merge(settingsUpdates, selfHostedTunnelStatusUpdates),
+                ),
               );
 
               return Stream.concat(
