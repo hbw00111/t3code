@@ -119,6 +119,12 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
 - One concern per PR. If the description says "also", split it.
 - When babysitting: poll checks and comments newer than the last push, verify each bot finding against the source, fix real ones, dismiss false positives with a written reason. Stay quiet when nothing is new. Stop when the bots are green on the latest commit.
 
+## Fork delivery
+
+This fork uses GitHub history and Releases for rollback. Do not create backup copies of the T3 Code app in `/Applications`.
+
+After a user-requested desktop feature is complete and focused checks pass, bump the release package version, commit the completed change with a conventional commit, and push the current branch to `origin` unless the user explicitly asks to keep it local. The fork desktop release workflow publishes the matching arm64 update from the version change.
+
 ## How it works
 
 Clients send typed WebSocket requests. The server turns them into _commands_, a pure _decider_ turns commands into persisted _events_, and a _projector_ derives the read model the UI renders. Provider CLIs run as subprocesses; per-provider _adapters_ translate their native protocols into orchestration events. Side effects run in queue-backed _reactors_ that emit _receipts_ when milestones land. Each turn ends with a _checkpoint_, a hidden git ref, so the app can diff and restore.
