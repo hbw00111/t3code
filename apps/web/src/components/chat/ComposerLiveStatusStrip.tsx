@@ -28,6 +28,7 @@ import { Button } from "~/components/ui/button";
 import { Spinner } from "~/components/ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import type { ThreadGoalAction, ThreadGoalEditorSession } from "~/goalCommandStateStore";
+import { currentPlanStepOrdinal } from "./planProgress.ts";
 
 export interface ComposerPlanStatus {
   readonly currentStep: string;
@@ -51,22 +52,6 @@ export interface ComposerLiveStatusStripProps {
   readonly onPauseGoal: () => void;
   readonly onResumeGoal: () => void;
   readonly onClearGoal: () => void;
-}
-
-function currentPlanStepOrdinal(plan: ComposerPlanStatus): number {
-  const totalSteps = plan.steps.length > 0 ? plan.steps.length : plan.totalSteps;
-  if (totalSteps === 0) return 0;
-
-  if (plan.steps.length === 0) {
-    const completedSteps = Math.max(0, Math.min(plan.completedSteps, totalSteps));
-    return completedSteps === totalSteps ? totalSteps : completedSteps + 1;
-  }
-
-  const activeIndex = plan.steps.findIndex((step) => step.status === "inProgress");
-  if (activeIndex >= 0) return activeIndex + 1;
-
-  const pendingIndex = plan.steps.findIndex((step) => step.status === "pending");
-  return pendingIndex >= 0 ? pendingIndex + 1 : totalSteps;
 }
 
 function goalStatusTranslationKey(status: ThreadGoalStatus): string {

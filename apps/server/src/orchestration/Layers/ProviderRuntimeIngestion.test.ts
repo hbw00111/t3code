@@ -2887,6 +2887,127 @@ describe("ProviderRuntimeIngestion", () => {
     ).toBe(true);
   });
 
+  it("finalizes stale plan progress when a turn completes successfully", async () => {
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1");
+    const turnId = asTurnId("turn-plan-finalization");
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-plan-finalization"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      threadId,
+      turnId,
+    });
+    await waitForThread(
+      harness.readModel,
+      (thread) => thread.session?.status === "running" && thread.session.activeTurnId === turnId,
+    );
+
+    harness.emit({
+      type: "turn.plan.updated",
+      eventId: asEventId("evt-turn-plan-started"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      threadId,
+      turnId,
+      sessionSequence: 1,
+      payload: {
+        plan: [
+          { step: "Implement the fix", status: "inProgress" },
+          { step: "Verify the result", status: "pending" },
+        ],
+      },
+    });
+    await waitForThread(harness.readModel, (thread) =>
+      thread.activities.some((activity) => activity.id === "evt-turn-plan-started"),
+    );
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-turn-completed-plan-finalization"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:02.000Z",
+      threadId,
+      turnId,
+      sessionSequence: 2,
+      payload: { state: "completed" },
+    });
+    const thread = await waitForThread(
+      harness.readModel,
+      (entry) => entry.session?.status === "ready" && entry.session.activeTurnId === null,
+    );
+    const finalPlanActivity = thread.activities.findLast(
+      (activity) => activity.kind === "turn.plan.updated" && activity.turnId === turnId,
+    );
+    const finalPlanPayload =
+      finalPlanActivity?.payload && typeof finalPlanActivity.payload === "object"
+        ? (finalPlanActivity.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(finalPlanPayload?.plan).toEqual([
+      { step: "Implement the fix", status: "completed" },
+      { step: "Verify the result", status: "completed" },
+    ]);
+  });
+
+  it("preserves unfinished plan progress when a turn is interrupted", async () => {
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1");
+    const turnId = asTurnId("turn-plan-interrupted");
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-plan-interrupted"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      threadId,
+      turnId,
+    });
+    await waitForThread(
+      harness.readModel,
+      (thread) => thread.session?.status === "running" && thread.session.activeTurnId === turnId,
+    );
+
+    harness.emit({
+      type: "turn.plan.updated",
+      eventId: asEventId("evt-turn-plan-interrupted"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      threadId,
+      turnId,
+      payload: {
+        plan: [
+          { step: "Implement the fix", status: "inProgress" },
+          { step: "Verify the result", status: "pending" },
+        ],
+      },
+    });
+    await waitForThread(harness.readModel, (thread) =>
+      thread.activities.some((activity) => activity.id === "evt-turn-plan-interrupted"),
+    );
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-turn-completed-plan-interrupted"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:02.000Z",
+      threadId,
+      turnId,
+      payload: { state: "interrupted" },
+    });
+    const thread = await waitForThread(
+      harness.readModel,
+      (entry) => entry.session?.status === "ready" && entry.session.activeTurnId === null,
+    );
+    const planActivities = thread.activities.filter(
+      (activity) => activity.kind === "turn.plan.updated" && activity.turnId === turnId,
+    );
+
+    expect(planActivities).toHaveLength(1);
+  });
+
   it("consumes P1 runtime events into thread metadata, diff checkpoints, and activities", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

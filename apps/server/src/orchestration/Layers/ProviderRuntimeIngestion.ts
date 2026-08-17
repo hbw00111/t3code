@@ -36,7 +36,7 @@ import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/Projectio
 import { isGitRepository } from "../../git/Utils.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ThreadBackgroundLivenessService } from "../ThreadBackgroundLiveness.ts";
-import { ThreadPlanProgressService } from "../ThreadPlanProgress.ts";
+import { type PlanStepInput, ThreadPlanProgressService } from "../ThreadPlanProgress.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
   ProviderRuntimeIngestionService,
@@ -79,6 +79,46 @@ function findTaskTitleInActivities(
     if (title && title.trim().length > 0) {
       return title;
     }
+  }
+  return undefined;
+}
+
+function findLatestPlanForTurn(
+  activities: ReadonlyArray<OrchestrationThreadActivity> | undefined,
+  turnId: TurnId,
+): ReadonlyArray<PlanStepInput> | undefined {
+  if (!activities) {
+    return undefined;
+  }
+  for (let index = activities.length - 1; index >= 0; index -= 1) {
+    const activity = activities[index];
+    if (!activity || activity.kind !== "turn.plan.updated" || activity.turnId !== turnId) {
+      continue;
+    }
+    const payload =
+      activity.payload && typeof activity.payload === "object"
+        ? (activity.payload as { plan?: unknown })
+        : undefined;
+    if (!Array.isArray(payload?.plan)) {
+      return undefined;
+    }
+    const plan = payload.plan.flatMap((entry): ReadonlyArray<PlanStepInput> => {
+      if (!entry || typeof entry !== "object") {
+        return [];
+      }
+      const step = entry as { step?: unknown; status?: unknown };
+      if (typeof step.step !== "string" || step.step.trim().length === 0) {
+        return [];
+      }
+      return [
+        {
+          step: step.step,
+          status:
+            step.status === "completed" || step.status === "inProgress" ? step.status : "pending",
+        },
+      ];
+    });
+    return plan.length > 0 ? plan : undefined;
   }
   return undefined;
 }
@@ -269,6 +309,10 @@ function normalizeRuntimeTurnState(
   }
 }
 
+function providerRuntimeEventSequence(event: ProviderRuntimeEvent): number | undefined {
+  return (event as ProviderRuntimeEvent & { sessionSequence?: number }).sessionSequence;
+}
+
 function orchestrationSessionStatusFromRuntimeState(
   state: "starting" | "running" | "waiting" | "ready" | "interrupted" | "stopped" | "error",
 ): "starting" | "running" | "ready" | "interrupted" | "stopped" | "error" {
@@ -362,12 +406,8 @@ export function runtimeEventToActivities(
   event: ProviderRuntimeEvent,
   taskTitle?: string,
 ): ReadonlyArray<OrchestrationThreadActivity> {
-  const maybeSequence = (() => {
-    const eventWithSequence = event as ProviderRuntimeEvent & { sessionSequence?: number };
-    return eventWithSequence.sessionSequence !== undefined
-      ? { sequence: eventWithSequence.sessionSequence }
-      : {};
-  })();
+  const eventSequence = providerRuntimeEventSequence(event);
+  const maybeSequence = eventSequence !== undefined ? { sequence: eventSequence } : {};
   switch (event.type) {
     case "thread.goal.updated":
     case "thread.goal.cleared":
@@ -1973,6 +2013,39 @@ const make = Effect.gen(function* () {
         if (event.type === "turn.plan.updated") {
           threadPlanProgress.recordPlanProgress(thread.id, event.payload.plan);
         } else if (event.type === "turn.completed" || event.type === "turn.aborted") {
+          if (
+            event.type === "turn.completed" &&
+            shouldApplyThreadLifecycle &&
+            eventTurnId !== undefined &&
+            normalizeRuntimeTurnState(event.payload.state) === "completed"
+          ) {
+            const livePlan = threadPlanProgress.getThreadPlanProgress(thread.id)?.steps;
+            const persistedPlan = findLatestPlanForTurn(
+              (yield* getLoadedThreadDetail())?.activities,
+              eventTurnId,
+            );
+            const plan = livePlan ?? persistedPlan;
+            if (plan?.some((step) => step.status !== "completed")) {
+              const completedPlan = plan.map((step) => ({ ...step, status: "completed" as const }));
+              const completionSequence = providerRuntimeEventSequence(event);
+              yield* orchestrationEngine.dispatch({
+                type: "thread.activity.append",
+                commandId: yield* providerCommandId(event, "turn-plan-complete"),
+                threadId: thread.id,
+                activity: {
+                  id: EventId.make(`${event.eventId}:plan-completed`),
+                  createdAt: now,
+                  tone: "info",
+                  kind: "turn.plan.updated",
+                  summary: "Plan completed",
+                  payload: { plan: completedPlan },
+                  turnId: eventTurnId,
+                  ...(completionSequence !== undefined ? { sequence: completionSequence } : {}),
+                },
+                createdAt: now,
+              });
+            }
+          }
           threadPlanProgress.clearThreadPlanProgress(thread.id);
         }
       }

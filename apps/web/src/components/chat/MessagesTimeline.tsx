@@ -72,6 +72,7 @@ import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { shouldAutoExpandChangedFiles } from "./changedFilesPresentation";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { currentPlanStepOrdinal } from "./planProgress.ts";
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRows,
@@ -1203,6 +1204,11 @@ const TurnPlanTimelineRow = memo(function TurnPlanTimelineRow({
   const { steps } = row.turnPlan.plan;
   const completedCount = steps.filter((step) => step.status === "completed").length;
   const allDone = completedCount === steps.length;
+  const currentStepOrdinal = currentPlanStepOrdinal({
+    completedSteps: completedCount,
+    totalSteps: steps.length,
+    steps,
+  });
   // Label priority: the in-progress step, else the next pending step (plan
   // just created), else the last step (plan finished, rendered muted).
   const label =
@@ -1248,7 +1254,7 @@ const TurnPlanTimelineRow = memo(function TurnPlanTimelineRow({
         </span>
         {steps.length > 1 ? (
           <span className="shrink-0 text-muted-foreground/50 tabular-nums">
-            {completedCount}/{steps.length}
+            {currentStepOrdinal}/{steps.length}
           </span>
         ) : null}
       </button>
